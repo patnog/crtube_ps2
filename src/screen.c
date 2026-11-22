@@ -8,6 +8,7 @@
 #include <stdarg.h>
 #include <tamtypes.h>
 #include <kernel.h>
+#include <timer.h>
 #include <ee_regs.h>
 #include <debug.h>
 #include <malloc.h>
@@ -15,6 +16,9 @@
 #include <dmaKit.h>
 
 #include "screen.h"
+#include "h264_yuv.h"
+#include "debug_log.h"
+#include <stdlib.h>
 #undef scr_printf
 
 #define CRTUBE_SCREEN_LINES 18
@@ -387,3 +391,214 @@ void crtube_screen_printf(const char *format, ...)
         }
     }
 }
+
+
+/*
+ * Upload a 320x240 H.264 YUV420 frame as six 128x128 CT32 textures.
+ * The GS texture allocator uses power-of-two 128x128 backing stores;
+ * edge tiles are clipped by the sprite dimensions.
+ */
+int crtube_screen_draw_h264_frame(const crtube_h264_frame_t *frame,
+                                  int x, int y)
+{
+    enum { FRAME_W = 320, FRAME_H = 240, TILE = 128, TILE_COLS = 3,
+           TILE_ROWS = 2 };
+    static crtube_screen_texture_t textures[TILE_COLS * TILE_ROWS];
+    static int initialized;
+    uint8_t *rgb;
+    unsigned int tile_pixels[TILE * TILE] __attribute__((aligned(16)));
+    unsigned tx, ty, row, col;
+    int result = 0;
+
+    if (!frame || frame->width != FRAME_W || frame->height != FRAME_H)
+        return -1;
+
+    rgb = (uint8_t *)malloc((size_t)FRAME_W * FRAME_H * 3u);
+    if (!rgb)
+        return -2;
+    if (crtube_h264_frame_to_rgb24(frame, rgb,
+                                   (size_t)FRAME_W * FRAME_H * 3u) < 0) {
+        free(rgb);
+        return -3;
+    }
+
+    for (ty = 0; ty < TILE_ROWS; ++ty) {
+        for (tx = 0; tx < TILE_COLS; ++tx) {
+            unsigned index = ty * TILE_COLS + tx;
+            unsigned tile_w = FRAME_W - tx * TILE;
+            unsigned tile_h = FRAME_H - ty * TILE;
+            if (tile_w > TILE) tile_w = TILE;
+            if (tile_h > TILE) tile_h = TILE;
+
+            memset(tile_pixels, 0, sizeof(tile_pixels));
+            for (row = 0; row < tile_h; ++row) {
+                for (col = 0; col < tile_w; ++col) {
+                    size_t src = (((size_t)(ty * TILE + row) * FRAME_W) +
+                                  tx * TILE + col) * 3u;
+                    tile_pixels[row * TILE + col] =
+                        0x80000000u |
+                        ((unsigned int)rgb[src] << 16) |
+                        ((unsigned int)rgb[src + 1u] << 8) |
+                        (unsigned int)rgb[src + 2u];
+                }
+            }
+
+            if (!initialized) {
+                if (crtube_screen_texture_create(&textures[index],
+                                                 tile_pixels, TILE, TILE) < 0) {
+                    result = -4;
+                    goto done;
+                }
+            } else {
+                /* Texture memory is resident in VRAM; update through gsKit. */
+                GSTEXTURE *native = (GSTEXTURE *)textures[index].native;
+                if (!native) {
+                    result = -5;
+                    goto done;
+                }
+                native->Mem = (u32 *)memalign(128,
+                    gsKit_texture_size_ee(TILE, TILE, GS_PSM_CT32));
+                if (!native->Mem) {
+                    result = -6;
+                    goto done;
+                }
+                memcpy(native->Mem, tile_pixels,
+                       gsKit_texture_size_ee(TILE, TILE, GS_PSM_CT32));
+                gsKit_texture_upload(screen_gs, native);
+                free(native->Mem);
+                native->Mem = NULL;
+            }
+
+            crtube_screen_texture_draw(&textures[index],
+                                       x + (int)(tx * TILE),
+                                       y + (int)(ty * TILE),
+                                       (int)tile_w, (int)tile_h);
+        }
+    }
+    initialized = 1;
+    crtube_screen_flush();
+
+done:
+    free(rgb);
+    return result;
+}
+
+
+
+#ifdef CRTUBE_H264_EDGE264_RUNTIME_SMOKE
+/*
+ * Experimental Edge264 YUV420 -> GS CT32 path.
+ * Keep the staging texture resident in EE RAM and upload it directly:
+ * no per-frame malloc, memcpy, or full-buffer clear.
+ */
+int crtube_screen_draw_edge264_frame(
+    const crtube_h264_edge264_frame_t *frame, int x, int y)
+{
+    enum { FRAME_W = 320, FRAME_H = 240, TEX_W = 512, TEX_H = 256 };
+    static GSTEXTURE *texture;
+    static unsigned int pixels[TEX_W * TEX_H]
+        __attribute__((aligned(128)));
+    static unsigned frame_number;
+    size_t vram_size;
+    u64 t0, t1, t2, t3;
+    u32 convert_us, upload_us, flush_us;
+    int result_w, result_h;
+    float scale_x, scale_y, scale;
+    int dst_x, dst_y;
+
+    if (!frame || !frame->y || !frame->cb || !frame->cr ||
+        frame->width != FRAME_W || frame->height != FRAME_H ||
+        frame->chroma_width != FRAME_W / 2u ||
+        frame->chroma_height != FRAME_H / 2u ||
+        frame->bit_depth_y != 8u || frame->bit_depth_c != 8u ||
+        frame->stride_y < FRAME_W || frame->stride_c < FRAME_W / 2u ||
+        screen_gs == NULL)
+        return -1;
+
+    t0 = GetTimerSystemTime();
+
+    /*
+     * Convert using the shared, host-tested BT.601 kernel. The kernel
+     * reuses each 4:2:0 chroma contribution for its two luma samples.
+     */
+    if (crtube_h264_yuv420_to_ct32(
+            frame->y, frame->cb, frame->cr,
+            FRAME_W, FRAME_H, frame->stride_y, frame->stride_c,
+            pixels, TEX_W) < 0)
+        return -4;
+
+    t1 = GetTimerSystemTime();
+
+    if (!texture) {
+        texture = (GSTEXTURE *)calloc(1, sizeof(*texture));
+        if (!texture)
+            return -2;
+        texture->Width = TEX_W;
+        texture->Height = TEX_H;
+        texture->PSM = GS_PSM_CT32;
+        texture->Filter = GS_FILTER_NEAREST;
+        texture->VramClut = 0;
+        texture->Clut = NULL;
+
+        vram_size = gsKit_texture_size(TEX_W, TEX_H, GS_PSM_CT32);
+        texture->Vram = gsKit_vram_alloc(screen_gs, vram_size,
+                                         GSKIT_ALLOC_USERBUFFER);
+        if (texture->Vram == GSKIT_ALLOC_ERROR) {
+            free(texture);
+            texture = NULL;
+            return -3;
+        }
+    }
+
+    /*
+     * GS texture upload consumes the source synchronously. Keep the
+     * 512x256 buffer aligned and reuse it instead of allocating/copying
+     * 512 KiB for every decoded frame. The unused right/bottom area is
+     * zero-initialized once by static storage.
+     */
+    texture->Mem = pixels;
+    /* Write back the complete padded staging texture before GS DMA reads it. */
+    FlushCache(0);
+    gsKit_texture_upload(screen_gs, texture);
+    texture->Mem = NULL;
+
+    t2 = GetTimerSystemTime();
+
+    scale_x = (float)screen_gs->Width / (float)FRAME_W;
+    scale_y = (float)screen_gs->Height / (float)FRAME_H;
+    scale = scale_x < scale_y ? scale_x : scale_y;
+    result_w = (int)((float)FRAME_W * scale + 0.5f);
+    result_h = (int)((float)FRAME_H * scale + 0.5f);
+    dst_x = ((int)screen_gs->Width - result_w) / 2 + x;
+    dst_y = ((int)screen_gs->Height - result_h) / 2 + y;
+
+    gsKit_prim_sprite_texture(screen_gs, texture,
+        (float)dst_x, (float)dst_y, 0.0f, 0.0f,
+        (float)(dst_x + result_w), (float)(dst_y + result_h),
+        (float)FRAME_W, (float)FRAME_H, 0,
+        GS_SETREG_RGBAQ(0x80, 0x80, 0x80, 0x80, 0));
+
+    crtube_screen_flush();
+    t3 = GetTimerSystemTime();
+
+    convert_us = (u32)(((t1 - t0) * 125u) / 18432u);
+    upload_us = (u32)(((t2 - t1) * 125u) / 18432u);
+    flush_us = (u32)(((t3 - t2) * 125u) / 18432u);
+    frame_number++;
+
+    if (frame_number == 1u) {
+        crtube_log("H.264 GS source: Y=%u Cb=%u Cr=%u stride=%u/%u "
+                   "sample_rgb=%08lx\n",
+                   frame->y[0], frame->cb[0], frame->cr[0],
+                   frame->stride_y, frame->stride_c,
+                   (unsigned long)pixels[0]);
+    }
+    if (frame_number <= 3u || (frame_number % 30u) == 0u) {
+        crtube_log("H.264 GS timing frame=%u convert_us=%u "
+                   "upload_us=%u flush_us=%u total_us=%u\n",
+                   frame_number, convert_us, upload_us, flush_us,
+                   convert_us + upload_us + flush_us);
+    }
+    return 0;
+}
+#endif

@@ -35,6 +35,39 @@ static const crtube_text_id_t g_menu_items[] = {
 
 #define CRTUBE_MENU_ITEMS ((int)(sizeof(g_menu_items) / sizeof(g_menu_items[0])))
 
+/* Boot-time H.264 result is collected before GS initialization. */
+static int g_h264_test_status = -999;
+
+void crtube_ui_set_h264_test_status(int decoder_result)
+{
+    g_h264_test_status = decoder_result;
+}
+
+static void crtube_ui_show_h264_test_status(void)
+{
+    char result_line[64];
+
+    if (g_h264_test_status == -999)
+        return;
+
+    crtube_screen_clear();
+    crtube_screen_draw_text(72, 176, 0x00ffffffu,
+                            "H.264 DECODER TEST FINISHED");
+    if (g_h264_test_status == 0)
+        crtube_screen_draw_text(72, 204, 0x0000ff00u,
+                                "Decoder: PASS");
+    else
+        crtube_screen_draw_text(72, 204, 0x00ff0000u,
+                                "Decoder: FAIL");
+    (void)snprintf(result_line, sizeof(result_line),
+                   "Result code: %d", g_h264_test_status);
+    crtube_screen_draw_text(72, 232, 0x00ffffffu, result_line);
+    crtube_screen_draw_text(72, 272, 0x00808080u,
+                            "SMB file test details: dbg_crtube.txt");
+    crtube_screen_flush();
+    DelayThread(3000000);
+}
+
 static void crtube_ui_render_home(int selection)
 {
     char menu_line[160];
@@ -195,8 +228,9 @@ void crtube_ui_run(int network_result, const char *ip_address)
     if (crtube_screen_init() != 0)
         scr_printf("Graphics initialization failed; text-only mode.\n");
     crtube_screen_clear();
-    crtube_ui_render_home(selection);
     crtube_screen_set_visible(1);
+    crtube_ui_show_h264_test_status();
+    crtube_ui_render_home(selection);
 
     for (;;) {
         unsigned short pressed;

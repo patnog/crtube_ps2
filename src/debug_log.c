@@ -6,19 +6,24 @@
 #define CRTUBE_SMB_LOG_PATH "smb0:/APPS/CRTUBE_PS2/dbg_crtube.txt"
 
 static FILE *g_log_file;
+static int g_log_started;
 
 int crtube_log_init(const char *unused_path)
 {
     (void)unused_path;
 
-    if (g_log_file != NULL) {
-        fclose(g_log_file);
-        g_log_file = NULL;
-    }
+    /* Keep an open session log. The experimental smoke test may close the
+       file before the UI later reopens diagnostics. */
+    if (g_log_file != NULL)
+        return 0;
 
-    /* Open only after smb0: has been authenticated and the share mounted. */
-    g_log_file = fopen(CRTUBE_SMB_LOG_PATH, "w");
-    return g_log_file != NULL ? 0 : -1;
+    /* Truncate once per boot; subsequent opens append instead of erasing
+       the decoder instrumentation. */
+    g_log_file = fopen(CRTUBE_SMB_LOG_PATH, g_log_started ? "a" : "w");
+    if (g_log_file == NULL)
+        return -1;
+    g_log_started = 1;
+    return 0;
 }
 
 void crtube_log(const char *format, ...)

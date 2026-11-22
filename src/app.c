@@ -14,6 +14,11 @@
 #include "network.h"
 #include "screen.h"
 #include "ui.h"
+#ifdef CRTUBE_H264_EDGE264_RUNTIME_SMOKE
+#include "h264_edge264.h"
+#include "h264_edge264_smb_playback.h"
+#include "debug_log.h"
+#endif
 
 extern unsigned char IOMANX_irx[];
 extern unsigned int size_IOMANX_irx;
@@ -24,6 +29,10 @@ static unsigned char pad_buffer[256] __attribute__((aligned(64)));
 static volatile unsigned short controller_buttons = 0xffff;
 static volatile unsigned short controller_pressed = 0;
 static volatile int controller_exit_requested = 0;
+static volatile int controller_monitor_stop = 0;
+static volatile int emergency_alarm_id = -1;
+static volatile int app_exit_started = 0;
+static int controller_pad_open = 0;
 static unsigned short previous_controller_buttons = 0xffff;
 static unsigned char emergency_stack[4096] __attribute__((aligned(16)));
 static ee_thread_t emergency_thread;
@@ -81,6 +90,7 @@ static int crtube_controller_init(void)
     scr_printf("Opening controller port...\n");
     if (padPortOpen(0, 0, pad_buffer) == 0)
         return -1;
+    controller_pad_open = 1;
 
     scr_printf("Controller ready.\n");
     return 0;
@@ -90,6 +100,7 @@ static void crtube_poll_wakeup(s32 alarm_id, u16 time, void *common)
 {
     (void)alarm_id;
     (void)time;
+    emergency_alarm_id = -1;
     iWakeupThread(*(int *)common);
 }
 
@@ -156,9 +167,55 @@ int crtube_controller_take_exit_request(void)
 
 void crtube_app_return_to_osdsys(void)
 {
-    scr_printf("\nReturning to PS2 system menu...\n");
+    int alarm_id;
+
+    if (app_exit_started)
+        return;
+    app_exit_started = 1;
+
+    scr_printf("\nShutting down CRTube...\n");
+
+    /* Stop the EE-side PAD polling thread before tearing down IOP services.
+       The thread checks the stop flag after arming its alarm, so it also
+       handles a shutdown racing with SetAlarm(). */
+    controller_monitor_stop = 1;
+    if (emergency_thread_id >= 0) {
+        WakeupThread(emergency_thread_id);
+        DelayThread(2000);
+        alarm_id = emergency_alarm_id;
+        if (alarm_id >= 0)
+            ReleaseAlarm(alarm_id);
+        emergency_alarm_id = -1;
+        TerminateThread(emergency_thread_id);
+        DeleteThread(emergency_thread_id);
+        emergency_thread_id = -1;
+    }
+
+    /* Release PAD ownership and network services before the IOP reset.
+       Resetting the IOP also unloads SMBMAN, FILEXIO and the network IRXs,
+       preventing stale IOP state from being inherited by the OPL session. */
+    if (controller_pad_open) {
+        padPortClose(0, 0);
+        padEnd();
+        controller_pad_open = 0;
+    }
+    crtube_network_deinit();
+
+    scr_printf("Returning to PS2 system menu...\n");
     DelayThread(100000);
+
+    SifExitRpc();
+    while (!SifIopReset(NULL, 0)) {
+    }
+    while (!SifIopSync()) {
+    }
+
     LoadExecPS2("rom0:OSDSYS", 0, NULL);
+
+    /* LoadExecPS2 should not return. If it does, keep the app from continuing
+       with partially shut-down services. */
+    for (;;)
+        SleepThread();
 }
 
 static void crtube_emergency_monitor(void *arg)
@@ -166,9 +223,24 @@ static void crtube_emergency_monitor(void *arg)
     int thread_id = GetThreadId();
 
     (void)arg;
-    for (;;) {
+    while (!controller_monitor_stop) {
+        int alarm_id;
+
         crtube_controller_poll();
-        SetAlarm(64, crtube_poll_wakeup, &thread_id);
+        if (controller_monitor_stop)
+            break;
+
+        alarm_id = SetAlarm(64, crtube_poll_wakeup, &thread_id);
+        emergency_alarm_id = alarm_id;
+
+        /* Close the race where shutdown begins between the stop check and
+           SleepThread(): cancel the newly-created alarm and leave the loop. */
+        if (controller_monitor_stop) {
+            if (alarm_id >= 0)
+                ReleaseAlarm(alarm_id);
+            emergency_alarm_id = -1;
+            break;
+        }
         SleepThread();
     }
 }
@@ -272,6 +344,76 @@ void crtube_app_run(void)
 
     /* Discard controller presses made during boot before accepting UI input. */
     (void)crtube_controller_take_pressed();
+
+#ifdef CRTUBE_H264_EDGE264_RUNTIME_SMOKE
+    {
+        unsigned decoded_frames = 0;
+        size_t decoder_peak = 0;
+        char smb_ip[16];
+        unsigned short smb_port = 0;
+        int smb_result;
+        int log_result = -1;
+        int smoke_result;
+
+        scr_printf("\nPreparing SMB instrumentation log...\n");
+        smb_ip[0] = '\0';
+        smb_result = crtube_smb_init();
+        if (smb_result == 0) {
+            log_result = crtube_log_init(NULL);
+            if (log_result == 0) {
+                (void)crtube_network_get_smb_endpoint(
+                    smb_ip, sizeof(smb_ip), &smb_port);
+                crtube_log("\n==================================================\n");
+                crtube_log("CRTube experimental H.264 runtime session\n");
+                crtube_log("SMB share mounted: server=%s port=%u\n",
+                           smb_ip[0] ? smb_ip : "unknown", (unsigned)smb_port);
+                crtube_log("Log path: smb0:/APPS/CRTUBE_PS2/dbg_crtube.txt\n");
+                crtube_log("Network startup result=%d local_ip=%s\n",
+                           net_result, ip_address[0] ? ip_address : "unknown");
+                scr_printf("SMB instrumentation log: READY\n");
+            }
+        }
+        if (smb_result != 0 || log_result != 0) {
+            scr_printf("SMB instrumentation log unavailable (smb=%d log=%d)\n",
+                       smb_result, log_result);
+        }
+
+        crtube_log("H.264 runtime smoke: begin\n");
+        smoke_result = crtube_h264_edge264_runtime_smoke(
+            &decoded_frames, &decoder_peak);
+        crtube_ui_set_h264_test_status(smoke_result);
+        if (smoke_result == 0) {
+            crtube_log("H.264 runtime smoke: PASS frames=%u peak_bytes=%lu\n",
+                       decoded_frames, (unsigned long)decoder_peak);
+            scr_printf("H.264 EE decode: PASS (%u frames, peak %lu bytes)\n",
+                       decoded_frames, (unsigned long)decoder_peak);
+        } else {
+            crtube_log("H.264 runtime smoke: FAIL result=%d frames=%u peak_bytes=%lu\n",
+                       smoke_result, decoded_frames,
+                       (unsigned long)decoder_peak);
+            scr_printf("H.264 EE decode: FAIL (%d)\n", smoke_result);
+        }
+        crtube_log("H.264 runtime smoke: end\n");
+        if (smb_result == 0) {
+            int playback_result;
+            crtube_log("H.264 SMB playback: requested file="
+                       "APPS/CRTUBE_PS2/240p-baseline.mp4\n");
+            playback_result = crtube_h264_edge264_smb_playback(
+                "APPS/CRTUBE_PS2/240p-baseline.mp4");
+            if (playback_result == 0)
+                scr_printf("H.264 SMB video: PASS\n");
+            else
+                scr_printf("H.264 SMB video: FAIL (%d)\n",
+                           playback_result);
+        } else {
+            crtube_log("H.264 SMB playback skipped: SMB mount failed=%d\n",
+                       smb_result);
+        }
+
+        if (log_result == 0)
+            crtube_log_close();
+    }
+#endif
 
     /* Boot diagnostics are buffered, not painted. The first visible frame
        is the main menu. */
