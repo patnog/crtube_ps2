@@ -21,6 +21,9 @@
 #include "debug_log.h"
 #include "tcp_probe.h"
 #include "http.h"
+#ifdef CRTUBE_ENABLE_YOUTUBE_PROBE
+#include "youtube_probe.h"
+#endif
 
 extern unsigned char DEV9_irx[];
 extern unsigned int size_DEV9_irx;
@@ -42,6 +45,20 @@ extern unsigned int size_SMBMAN_irx;
 static int g_netman_initialized;
 static int g_ps2ip_initialized;
 static int g_network_ready;
+static void (*g_network_progress_callback)(crtube_text_id_t text_id);
+
+void crtube_network_set_progress_callback(
+    void (*callback)(crtube_text_id_t text_id))
+{
+    g_network_progress_callback = callback;
+}
+
+void crtube_network_report_progress(crtube_text_id_t text_id)
+{
+    if (g_network_progress_callback != NULL)
+        g_network_progress_callback(text_id);
+}
+
 static int g_smb_ready;
 static crtube_config_t g_config;
 static char g_dns_server[16];
@@ -442,16 +459,19 @@ void crtube_network_run_diagnostics(void)
         return;
     }
 
-    /* These probes can block in IOP drivers or PS2IPS. This function is only
-       called after SMB has been mounted and the persistent log is open. */
+    /* These probes can block in IOP drivers or PS2IPS. They are invoked only
+       after an explicit user request from Network Status. The caller attempts
+       to open the SMB log first; results are not persisted if SMB is unavailable. */
     crtube_log("Network diagnostics: beginning post-SMB probes.\n");
 
     /* The official PS2SDK ps2http.irx registers an IOP IOMAN filesystem
        driver named http:. fileXioOpen/read therefore execute the HTTP socket
        operations inside the IOP PS2IP stack, bypassing EE PS2IPS socket RPC.
        Use a numeric address to keep DNS out of this comparison. */
+    crtube_network_report_progress(CRTUBE_TEXT_NETWORK_PROGRESS_LOADING_HTTP);
     crtube_log("PS2HTTP diagnostic: driver load starting.\n");
     if (load_ps2http_driver() == 0) {
+        crtube_network_report_progress(CRTUBE_TEXT_NETWORK_PROGRESS_HTTP_WAN);
         crtube_log("PS2HTTP diagnostic: opening http://1.1.1.1/\n");
         run_ps2http_probe(&g_ps2http_wan_probe, "WAN-1.1.1.1-port-80",
                           "http://1.1.1.1/");
@@ -467,29 +487,22 @@ void crtube_network_run_diagnostics(void)
     /* These local-only probes isolate PS2IPS/RPC from external routing.
        With no listener on port 65000, ECONNREFUSED is the expected result
        when the local TCP/IP path is functioning. */
+    crtube_network_report_progress(CRTUBE_TEXT_NETWORK_PROGRESS_LOOPBACK);
     crtube_log("PS2IPS loopback diagnostic starting: 127.0.0.1:65000\n");
     memset(&g_loopback_tcp_probe, 0, sizeof(g_loopback_tcp_probe));
     g_loopback_tcp_probe_result = crtube_tcp_probe_ipv4(
         "127.0.0.1", 65000, &g_loopback_tcp_probe);
+    crtube_network_report_progress(CRTUBE_TEXT_NETWORK_PROGRESS_SELF_IP);
     crtube_log("PS2IPS self-IP diagnostic starting: %s:65000\n", g_config.ip);
     memset(&g_self_tcp_probe, 0, sizeof(g_self_tcp_probe));
     g_self_tcp_probe_result = crtube_tcp_probe_ipv4(
         g_config.ip, 65000, &g_self_tcp_probe);
     g_local_tcp_probes_ran = 1;
-    scr_printf("PS2IPS loopback probe 127.0.0.1:65000 result=%d connect=%d so_error=%d (%s)\n",
-               g_loopback_tcp_probe_result,
-               g_loopback_tcp_probe.connect_result,
-               g_loopback_tcp_probe.so_error,
-               tcp_probe_error_name(g_loopback_tcp_probe.so_error));
-    scr_printf("PS2IPS self-IP probe %s:65000 result=%d connect=%d so_error=%d (%s)\n",
-               g_config.ip, g_self_tcp_probe_result,
-               g_self_tcp_probe.connect_result,
-               g_self_tcp_probe.so_error,
-               tcp_probe_error_name(g_self_tcp_probe.so_error));
 
     /* A TCP SYN to the configured gateway forces lwIP to resolve the next-hop
        MAC through ARP. No HTTP, DNS, SMBMAN or application payload is used. */
     if (g_config.gateway[0] != '\0') {
+        crtube_network_report_progress(CRTUBE_TEXT_NETWORK_PROGRESS_GATEWAY);
         crtube_log("PS2IPS gateway diagnostic starting: %s:80\n", g_config.gateway);
         memset(&g_gateway_tcp_probe, 0, sizeof(g_gateway_tcp_probe));
         capture_netman_snapshot(&g_gateway_stats_before);
@@ -501,18 +514,20 @@ void crtube_network_run_diagnostics(void)
                    g_gateway_tcp_probe_result,
                    g_gateway_tcp_probe.connect_result,
                    g_gateway_tcp_probe.so_error);
-        scr_printf("Gateway TCP probe %s:80 result=%d connect=%d so_error=%d (%s)\n",
-                   g_config.gateway, g_gateway_tcp_probe_result,
-                   g_gateway_tcp_probe.connect_result,
-                   g_gateway_tcp_probe.so_error,
-                   tcp_probe_error_name(g_gateway_tcp_probe.so_error));
     } else {
         g_gateway_probe_ran = 0;
         crtube_log("PS2IPS gateway diagnostic skipped: no gateway configured.\n");
-        scr_printf("Gateway TCP probe skipped: no gateway configured\n");
     }
 
 
+#ifdef CRTUBE_ENABLE_YOUTUBE_PROBE
+    /* InnerTube is HTTPS POST and returns search metadata as JSON. */
+    crtube_youtube_run_probe();
+#else
+    crtube_log("YouTube InnerTube probe not built. Rebuild with YOUTUBE_TEST=1.\n");
+#endif
+
+    crtube_network_report_progress(CRTUBE_TEXT_NETWORK_PROGRESS_FINISHING);
     crtube_log("Network diagnostics: post-SMB probes completed.\n");
 }
 

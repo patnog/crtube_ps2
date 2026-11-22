@@ -2,13 +2,9 @@
 #include <stdio.h>
 #include <string.h>
 
-/* The application uses the PS2IPS RPC socket implementation on the IOP.
-   This header enables the PS2SDK socket aliases for that RPC-backed API. */
+/* Use the PS2IPS lwIP socket API directly; close with disconnect(), not
+   libcglue close(), because these are IOP socket handles. */
 #include <ps2ip.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <unistd.h>
 
 #include "tcp_probe.h"
 
@@ -90,7 +86,7 @@ int crtube_tcp_probe_ipv4(const char *ip, unsigned short port,
     result->so_error_errno = errno;
 
     errno = 0;
-    result->close_result = close(sock);
+    result->close_result = disconnect(sock);
     result->close_errno = errno;
 
     return rc == 0 ? 0 : -1;

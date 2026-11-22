@@ -2,6 +2,7 @@
 #define CRTUBE_PS2_NETWORK_H
 
 #include <stddef.h>
+#include "localization.h"
 
 #define CRTUBE_NETWORK_OK             0
 #define CRTUBE_NETWORK_ERR_MODULE    -1
@@ -12,6 +13,9 @@
 int crtube_network_init(void);
 void crtube_network_deinit(void);
 void crtube_network_run_diagnostics(void);
+void crtube_network_set_progress_callback(
+    void (*callback)(crtube_text_id_t text_id));
+void crtube_network_report_progress(crtube_text_id_t text_id);
 void crtube_network_log_diagnostics(void);
 int crtube_network_is_ready(void);
 int crtube_network_get_ip(char *buffer, size_t buffer_size);

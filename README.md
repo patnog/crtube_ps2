@@ -13,16 +13,16 @@ validated.
 - [x] Ethernet and DHCP integration based on the installed `tcpip-dhcp` sample.
 - [ ] Validate Ethernet link and DHCP lease on physical hardware.
 - [ ] DNS, TCP and HTTP tests.
-- [ ] HTTPS/TLS backend.
-- [ ] YouTube search and metadata extraction port.
-- [ ] Thumbnail download, JPEG decode and GS rendering.
+- [x] BearSSL source and PS2IPS TLS transport integrated (runtime entropy/RTC gates still pending).
+- [x] YouTube search and metadata extraction port.
+- [x] Thumbnail download, JPEG decode and GS texture rendering (hardware validation pending).
 - [ ] Media demux, audio output and video decoder benchmarks.
 
 No PS3-specific source files or libraries are linked by this target.
 
 ## Requirements
 
-Install the PS2DEV environment and PS2SDK. The default expected locations are:
+Install the PS2DEV environment and PS2SDK, plus gsKit/dmaKit and the PS2SDK ports `libjpeg_ps2_addons` and `libjpeg` (headers and libraries). The default expected locations are:
 
 ```sh
 export PS2DEV=/usr/local/ps2dev
@@ -39,7 +39,10 @@ From this directory:
 make
 ```
 
-The output is `crtube-ps2.elf`.
+The default build enables the YouTube test and the thumbnail grid. The image
+renderer uses `gsKit` for GS texture allocation/upload and textured sprites,
+and libjpeg to decode the 120x90 `default.jpg` thumbnails into 128x128 CT32
+textures. The output is `crtube-ps2.elf`.
 
 Clean generated files:
 
@@ -135,3 +138,30 @@ Example:
 This is an initial configuration patch: SMB authentication, share mounting,
 and SMB-backed logging are not enabled yet. Persistent logging is disabled in
 this step so an ELF launched from a memory card cannot write logs to that card.
+
+
+## BearSSL HTTPS diagnostic
+
+The optional `make youtube-test` target builds the bundled BearSSL client and
+replaces the libcurl/wolfSSL diagnostic path. BearSSL runs over PS2IPS TCP
+sockets and uses the project's existing UDP DNS resolver. The transport is
+TLS 1.2 only, validates the hostname and certificate chain against the bundled
+Google Trust Services and Let's Encrypt roots, and uses one connection at a
+time.
+
+Resource constraints are explicit: one static TLS context, no connection pool,
+and a 16,709-byte `BR_SSL_BUFSIZE_MONO` half-duplex buffer. The BearSSL sources
+are archived locally; unused archive members are not pulled into the ELF.
+
+**Security prerequisite:** the PS2SDK source snapshot declares `getrandom()`
+but contains no EE implementation. The transport checks for a runtime provider
+and requires it to return 32 bytes of entropy. It has no `rand()`, timer, MAC,
+or predictable-seed fallback. The transport also requires a plausible console
+RTC value from `time()` for certificate validity checks. If either prerequisite
+is unavailable, the diagnostic stops before sending TLS traffic.
+
+The BearSSL source and adapter passed host-compiler checks (277 BearSSL C
+translation units compiled; adapter and trust anchors passed strict syntax
+checks). A PS2 cross-build and a physical-console handshake have not yet been
+performed. The runtime entropy provider and RTC initialization must be verified
+on the target console before HTTPS can be considered operational.
