@@ -93,6 +93,46 @@
 #define CABAC 1
 #include "edge264_slice.c"
 
+static uint64_t edge264_profile_ticks[EDGE264_PROFILE_COUNT];
+static uint32_t edge264_profile_calls[EDGE264_PROFILE_COUNT];
+static int edge264_profile_enabled;
+
+void edge264_profile_reset(void) {
+    memset(edge264_profile_ticks, 0, sizeof(edge264_profile_ticks));
+    memset(edge264_profile_calls, 0, sizeof(edge264_profile_calls));
+    edge264_profile_enabled = 1;
+}
+
+void edge264_profile_disable(void) {
+    edge264_profile_enabled = 0;
+}
+
+uint64_t edge264_profile_begin(void) {
+#if defined(CRTUBE_EDGE264_PROFILE)
+    return edge264_profile_enabled ? crtube_edge264_profile_ticks() : 0;
+#else
+    return 0;
+#endif
+}
+
+void edge264_profile_read(Edge264Profile *profile) {
+    if (!profile) return;
+    memcpy(profile->ticks, edge264_profile_ticks, sizeof(edge264_profile_ticks));
+    memcpy(profile->calls, edge264_profile_calls, sizeof(edge264_profile_calls));
+}
+
+void edge264_profile_accumulate(unsigned id, uint64_t start_ticks) {
+#if defined(CRTUBE_EDGE264_PROFILE)
+    if (edge264_profile_enabled && id < EDGE264_PROFILE_COUNT) {
+        edge264_profile_ticks[id] += crtube_edge264_profile_ticks() - start_ticks;
+        edge264_profile_calls[id]++;
+    }
+#else
+    (void)id;
+    (void)start_ticks;
+#endif
+}
+
 #ifndef VARIANT
 	#include "edge264_api.c"
 

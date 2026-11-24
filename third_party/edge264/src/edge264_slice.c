@@ -102,7 +102,7 @@
 		return code & 15;
 	}
 	
-	static noinline int parse_residual_coeffs_cavlc(Edge264Context *ctx, int startIdx, int endIdx, int TrailingOnes, int TotalCoeff) {
+	static noinline int parse_residual_coeffs_cavlc_profile_impl(Edge264Context *ctx, int startIdx, int endIdx, int TrailingOnes, int TotalCoeff) {
 		// parse all level values from end to start
 		int32_t level[16];
 		size_t signs = ~ctx->t.gb.msb_cache;
@@ -177,6 +177,18 @@
 		// trailing_ones_sign_flags+total_zeros+run_before consumed at most 31 bits, so we can delay refill here
 		return ctx->t.gb.lsb_cache ? 1 : refill(&ctx->t.gb, 1);
 	}
+
+static noinline int parse_residual_coeffs_cavlc(Edge264Context *ctx, int startIdx, int endIdx, int TrailingOnes, int TotalCoeff) {
+#if defined(CRTUBE_EDGE264_PROFILE)
+    uint64_t _profile_start = edge264_profile_begin();
+#endif
+    int result = parse_residual_coeffs_cavlc_profile_impl(ctx, startIdx, endIdx, TrailingOnes, TotalCoeff);
+#if defined(CRTUBE_EDGE264_PROFILE)
+    edge264_profile_accumulate(10, _profile_start);
+#endif
+    return result;
+}
+
 
 	static noinline int parse_residual_block_4x4_cavlc(Edge264Context *ctx, int startIdx, int i4x4, int nA, int nB) {
 		static const uint8_t nC_offset[8] = {184, 184, 80, 80, 0, 0, 0, 0};
@@ -1631,6 +1643,10 @@ static void CAFUNC(parse_P_mb)
  */
 static noinline void CAFUNC(parse_slice_data)
 {
+#if !CABAC && defined(CRTUBE_EDGE264_PROFILE)
+	uint64_t _profile_slice_start = edge264_profile_begin();
+#endif
+
 	static const i8x16 block_unavailability[16] = {
 		{ 0,  0,  0,  4,  0,  0,  0,  4,  0,  0,  0,  4,  0,  4,  0,  4},
 		{ 1,  0,  9,  4,  0,  0,  0,  4,  9,  0,  9,  4,  0,  4,  0,  4},
@@ -1835,6 +1851,10 @@ static noinline void CAFUNC(parse_slice_data)
 	// no current macroblock past this point
 	ctx->samples_mb[0] = ctx->samples_mb[1] = ctx->samples_mb[2] = NULL;
 	ctx->_mbA = ctx->_mbB = ctx->_mbC = ctx->_mbD = ctx->mbCol = ctx->_mb = NULL;
+
+#if !CABAC && defined(CRTUBE_EDGE264_PROFILE)
+	edge264_profile_accumulate(11, _profile_slice_start);
+#endif
 }
 
 #undef CABAC

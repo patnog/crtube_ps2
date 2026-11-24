@@ -18,8 +18,70 @@
 	// absolute differences clamped to 0..128
 	#define packabd16(a, b, c, d) (u8x16)abs8(packs16(wasm_i16x8_sub_sat(a, b), wasm_i16x8_sub_sat(c, d)))
 #elif SIMD == R5900
-	#define addsu8(a,b) ((u8x16)({u8x16 _r;for(int _i=0;_i<16;_i++){unsigned _v=(unsigned)(uint8_t)(a)[_i]+(unsigned)(uint8_t)(b)[_i];_r[_i]=(uint8_t)(_v>255?255:_v);} _r;}))
-	#define packabd16(a,b,c,d) ((u8x16)({u8x16 _r; i16x8 _a=(a),_b=(b),_c=(c),_d=(d);for(int _i=0;_i<8;_i++){int _x=_a[_i]-_b[_i],_y=_c[_i]-_d[_i];_r[_i]=(uint8_t)(_x<0?-_x:_x);_r[_i+8]=(uint8_t)(_y<0?-_y:_y);} _r;}))
+	static always_inline u8x16 addsu8(u8x16 a, u8x16 b) {
+#if defined(__mips__) && defined(CRTUBE_R5900_MMI) && !defined(CRTUBE_H264_MMI_MATRIX_TEST)
+        /* Keep PADDUB in the hot deblocking path. Calling the out-of-line
+         * MMI wrapper for every saturated add adds call/return and vector
+         * marshalling overhead to an operation used repeatedly per edge. */
+        Edge264R5900Vec128 x __attribute__((aligned(16)));
+        Edge264R5900Vec128 y __attribute__((aligned(16)));
+        Edge264R5900Vec128 z __attribute__((aligned(16)));
+        memcpy(&x, &a, 16);
+        memcpy(&y, &b, 16);
+        __asm__ volatile(
+            "lq $8, %1\n\t"
+            "lq $9, %2\n\t"
+            "paddub $8, $8, $9\n\t"
+            "sq $8, %0\n\t"
+            : "=m"(z)
+            : "m"(x), "m"(y)
+            : "$8", "$9", "memory");
+        memcpy(&a, &z, 16);
+        return a;
+#elif defined(__mips__) && defined(CRTUBE_R5900_MMI)
+        if (edge264_r5900_mmi_enabled(EDGE264_R5900_MMI_OP_DEBLOCK_ADD)) {
+            Edge264R5900Vec128 x, y, z;
+            edge264_r5900_mmi_note(EDGE264_R5900_MMI_OP_DEBLOCK_ADD);
+            memcpy(&x, &a, 16);
+            memcpy(&y, &b, 16);
+            z = edge264_r5900_add_u8_sat(x, y);
+            memcpy(&a, &z, 16);
+            return a;
+        }
+#endif
+        {
+            u8x16 r;
+            for (int i = 0; i < 16; ++i) {
+                unsigned sum = (unsigned)(uint8_t)a[i] +
+                               (unsigned)(uint8_t)b[i];
+                r[i] = (uint8_t)(sum > 255u ? 255u : sum);
+            }
+            return r;
+        }
+    }
+	static always_inline u8x16 packabd16(i16x8 a, i16x8 b, i16x8 c, i16x8 d) {
+#if defined(__mips__) && defined(CRTUBE_R5900_MMI)
+        if (edge264_r5900_mmi_enabled(EDGE264_R5900_MMI_OP_DEBLOCK_PACKABD) ||
+            edge264_r5900_mmi_enabled(EDGE264_R5900_MMI_OP_DEBLOCK_PACKABD_ALT)) {
+            Edge264R5900Vec128 x, y, z, w, out;
+            if (!edge264_r5900_mmi_enabled(EDGE264_R5900_MMI_OP_DEBLOCK_PACKABD_ALT))
+                edge264_r5900_mmi_note(EDGE264_R5900_MMI_OP_DEBLOCK_PACKABD);
+            memcpy(&x, &a, 16); memcpy(&y, &b, 16);
+            memcpy(&z, &c, 16); memcpy(&w, &d, 16);
+            out = edge264_r5900_pack_absdiff_s16_u8(x, y, z, w);
+            memcpy(&a, &out, 16);
+            return (u8x16)a;
+        }
+#endif
+        u8x16 r;
+        for (int i = 0; i < 8; ++i) {
+            int x = (int)a[i] - (int)b[i];
+            int y = (int)c[i] - (int)d[i];
+            r[i] = (uint8_t)(x < 0 ? -x : x);
+            r[i + 8] = (uint8_t)(y < 0 ? -y : y);
+        }
+        return r;
+    }
 #elif SIMD == CLANG
 	#define addsu8(a, b) __builtin_elementwise_add_sat((u8x16)(a), (u8x16)(b))
 	#define packabd16(a, b, c, d) (u8x16)abs8(packs16(__builtin_elementwise_sub_sat((i16x8)(a), (i16x8)(b)), __builtin_elementwise_sub_sat((i16x8)(c), (i16x8)(d))))
@@ -927,7 +989,7 @@ static void deblock_Y_8bit(Edge264Context *ctx) {
  *         mvs_c=0 |    0     |    1     |    1     |    0     |
  * ----------------+----------+----------+----------+----------+
  */
-static noinline void deblock_mb(Edge264Context *ctx)
+static noinline void deblock_mb_profile_impl(Edge264Context *ctx)
 {
 	static const u8x16 idx2alpha[3] =
 		{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 4, 5, 6, 7, 8, 9, 10, 12, 13, 15, 17, 20, 22, 25, 28, 32, 36, 40, 45, 50, 56, 63, 71, 80, 90, 101, 113, 127, 144, 162, 182, 203, 226, 255, 255};
@@ -944,6 +1006,26 @@ static noinline void deblock_mb(Edge264Context *ctx)
 	// compute all values of alpha and beta for each of the color planes first
 	mbA = (mb->filter_edges & 1) ? mb - 1 : mb;
 	mbB = (mb->filter_edges & 2) ? mb - 1 - ctx->t.pic_width_in_mbs : mb;
+
+	/*
+	 * alpha and beta are both zero while their QP indices are <= 15
+	 * (the first 12 entries of both lookup tables are zero after the
+	 * index-4 adjustment). qPav is an unsigned rounded average, so it
+	 * cannot exceed the maximum QP of the current, left, and top MBs.
+	 * This conservative scalar bound avoids all vector setup and motion
+	 * boundary-strength work when no sample can possibly be filtered.
+	 */
+	{
+		int qp_max = (int)mb->QP_s;
+		int qp_left = (int)mbA->QP_s;
+		int qp_top = (int)mbB->QP_s;
+		if (qp_left > qp_max) qp_max = qp_left;
+		if (qp_top > qp_max) qp_max = qp_top;
+		if (qp_max + (int)ctx->t.FilterOffsetA <= 15 &&
+		    qp_max + (int)ctx->t.FilterOffsetB <= 15)
+			return;
+	}
+
 	i8x16 zero = {};
 	i8x16 qP = set32((int32_t)mb->QP_s);
 	i32x4 qPAB = {(int32_t)mbA->QP_s, (int32_t)mbB->QP_s};
@@ -1124,3 +1206,14 @@ static noinline void deblock_mb(Edge264Context *ctx)
 	// jump to luma deblocking filter
 	deblock_Y_8bit(ctx);
 }
+
+#if defined(CRTUBE_EDGE264_PROFILE)
+static noinline void deblock_mb(Edge264Context *ctx) {
+	uint64_t _profile_start = edge264_profile_begin();
+	deblock_mb_profile_impl(ctx);
+	edge264_profile_accumulate(9, _profile_start);
+}
+#else
+static noinline void deblock_mb(Edge264Context *ctx) { deblock_mb_profile_impl(ctx); }
+#endif
+

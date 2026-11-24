@@ -37,6 +37,31 @@ extern "C" {
 
 typedef struct Edge264Decoder Edge264Decoder;
 
+#define EDGE264_PROFILE_COUNT 12
+#define EDGE264_PROFILE_DECODE_INTER 0
+#define EDGE264_PROFILE_INTRA4X4 1
+#define EDGE264_PROFILE_INTRA8X8 2
+#define EDGE264_PROFILE_INTRA16X16 3
+#define EDGE264_PROFILE_INTRA_CHROMA 4
+#define EDGE264_PROFILE_IDCT4X4 5
+#define EDGE264_PROFILE_IDCT8X8 6
+#define EDGE264_PROFILE_DC4X4 7
+#define EDGE264_PROFILE_TRANSFORM_DC4X4 8
+#define EDGE264_PROFILE_DEBLOCK 9
+#define EDGE264_PROFILE_CAVLC_RESIDUAL 10
+#define EDGE264_PROFILE_CAVLC_SLICE 11
+
+typedef struct Edge264Profile {
+    uint64_t ticks[EDGE264_PROFILE_COUNT];
+    uint32_t calls[EDGE264_PROFILE_COUNT];
+} Edge264Profile;
+
+void edge264_profile_reset(void);
+void edge264_profile_disable(void);
+uint64_t edge264_profile_begin(void);
+void edge264_profile_read(Edge264Profile *profile);
+void edge264_profile_accumulate(unsigned id, uint64_t start_ticks);
+
 typedef int (*Edge264LogCb)(const char *str, void *log_arg);
 typedef void (*Edge264UnrefCb)(int ret, void *unref_arg);
 typedef void (*Edge264AllocCb)(void **samples, unsigned samples_size, void **mbs, unsigned mbs_size, int errno_on_fail, void *alloc_arg);

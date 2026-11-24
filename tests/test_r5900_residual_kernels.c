@@ -1,3 +1,9 @@
 #include "../third_party/edge264/src/edge264_residual.c"
 #include <stdio.h>
-int main(void){i32x4 a={-100000,12345,200000,-32769},b={50000,-70000,32768,90000};u16x8 ls={1,2,3,4,5,6,7,8};i32x4 off={0,3,-4,100},sh={1,2,3,4};i16x8 got=scale32(a,b,ls,off,sh);for(int i=0;i<4;i++){int32_t v=((int32_t)ls[i]*a[i]+off[i])>>sh[i];if(v>32767)v=32767;if(v< -32768)v=-32768;if(got[i]!=(int16_t)v){fprintf(stderr,"lo %d got=%d expected=%d\n",i,got[i],(int16_t)v);return 1;}}for(int i=0;i<4;i++){int32_t v=((int32_t)ls[i+4]*b[i]+off[i])>>sh[i];if(v>32767)v=32767;if(v< -32768)v=-32768;if(got[i+4]!=(int16_t)v){fprintf(stderr,"hi %d got=%d expected=%d\n",i,got[i+4],(int16_t)v);return 2;}}puts("R5900 residual scaling kernel: PASS");return 0;}
+#ifdef CRTUBE_R5900_SMB_LOG
+#include "../include/debug_log.h"
+#define TEST_LOG(...) crtube_log(__VA_ARGS__)
+#else
+#define TEST_LOG(...) printf(__VA_ARGS__)
+#endif
+int main(void){i32x4 a={-100000,12345,200000,-32769},b={50000,-70000,32768,90000};u16x8 ls={1,2,3,4,5,6,7,8};i32x4 off={0,3,-4,100},sh={1,2,3,4};i16x8 got=scale32(a,b,ls,off,sh);for(int i=0;i<4;i++){int32_t v=((int32_t)ls[i]*a[i]+off[i])>>sh[i];if(v>32767)v=32767;if(v< -32768)v=-32768;if(got[i]!=(int16_t)v){TEST_LOG("residual lo %d got=%d expected=%d\n",i,got[i],(int16_t)v);return 1;}}for(int i=0;i<4;i++){int32_t v=((int32_t)ls[i+4]*b[i]+off[i])>>sh[i];if(v>32767)v=32767;if(v< -32768)v=-32768;if(got[i+4]!=(int16_t)v){TEST_LOG("hi %d got=%d expected=%d\n",i,got[i+4],(int16_t)v);return 2;}}TEST_LOG("R5900 residual scaling kernel: PASS\n");return 0;}

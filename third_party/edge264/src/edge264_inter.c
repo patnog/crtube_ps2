@@ -1,11 +1,53 @@
 #include "edge264_internal.h"
 
+#if SIMD == R5900 && defined(CRTUBE_EDGE264_VU_OFFLOAD)
+extern int crtube_vu_inter_luma_vertical(const uint8_t *src, unsigned stride,
+                                         unsigned rows, int16_t *output,
+                                         unsigned output_stride);
+#endif
+
 #define pack_w(w0, w1) ((w1) << 8 | (w0) & 255)
+#if SIMD == R5900
+/* Fused diagonal six-tap kernel.  Each 64-bit EE lane performs the complete
+ * two-stage H.264 diagonal combination without round-tripping intermediates
+ * through C vectors between individual MMI operations. */
+static always_inline uint64_t r5900_sixtap_hv64(uint64_t a, uint64_t b,
+                                                uint64_t c, uint64_t d,
+                                                uint64_t e, uint64_t f) {
+    int16_t av[4], bv[4], cv[4], dv[4], ev[4], fv[4], rv[4];
+    memcpy(av, &a, 8); memcpy(bv, &b, 8); memcpy(cv, &c, 8);
+    memcpy(dv, &d, 8); memcpy(ev, &e, 8); memcpy(fv, &f, 8);
+    for (int i = 0; i < 4; ++i) {
+        int16_t af = (int16_t)(av[i] + fv[i]);
+        int16_t be = (int16_t)(bv[i] + ev[i]);
+        int16_t cd = (int16_t)(cv[i] + dv[i]);
+        int16_t x = (int16_t)(af - be) >> 2;
+        int16_t y = (int16_t)(cd - be);
+        rv[i] = (int16_t)((int16_t)(x + y) >> 2) + cd;
+    }
+    memcpy(&a, rv, 8);
+    return a;
+}
+static always_inline i16x8 r5900_sixtap_hv(i16x8 a, i16x8 b, i16x8 c,
+                                           i16x8 d, i16x8 e, i16x8 f) {
+    uint64_t av[2], bv[2], cv[2], dv[2], ev[2], fv[2], rv[2];
+    memcpy(av, &a, 16); memcpy(bv, &b, 16); memcpy(cv, &c, 16);
+    memcpy(dv, &d, 16); memcpy(ev, &e, 16); memcpy(fv, &f, 16);
+    rv[0] = r5900_sixtap_hv64(av[0], bv[0], cv[0], dv[0], ev[0], fv[0]);
+    rv[1] = r5900_sixtap_hv64(av[1], bv[1], cv[1], dv[1], ev[1], fv[1]);
+    memcpy(&a, rv, 16);
+    return a;
+}
+#endif
 static always_inline i16x8 sixtapHV(i16x8 a, i16x8 b, i16x8 c, i16x8 d, i16x8 e, i16x8 f) {
+#if SIMD == R5900
+	return r5900_sixtap_hv(a, b, c, d, e, f);
+#else
 	i16x8 af = a + f;
 	i16x8 be = b + e;
 	i16x8 cd = c + d;
 	return ((((af - be) >> 2) + (cd - be)) >> 2) + cd;
+#endif
 }
 
 #if SIMD == SSE
@@ -235,16 +277,190 @@ static always_inline i16x8 sixtapHV(i16x8 a, i16x8 b, i16x8 c, i16x8 d, i16x8 e,
 		i16x8 res1 = sixtapVhi(l0, _##l0##1, _##l0##2, _##l0##3, _##l0##4, _##l0##5);
 #elif SIMD == R5900
 	#define shrrpus16(a,b,n) packus16(((i16x8)(a)+(1<<((n)-1)))>>(n),((i16x8)(b)+(1<<((n)-1)))>>(n))
+	static const i8x16 r5900_sixtap_mul1 = {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1};
+	static const i8x16 r5900_sixtap_mul5 = {-5,-5,-5,-5,-5,-5,-5,-5,-5,-5,-5,-5,-5,-5,-5,-5};
+	static const i8x16 r5900_sixtap_mul20 = {20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20};
 	static inline i32x4 zipmd64(i32x4 a,i32x4 b) {return (i32x4){a[1],a[2],b[1],b[2]};}
-	static inline u8x16 maddshrL(u8x16 q,u8x16 p,i16x8 wq,i16x8 wp,i16x8 o,i16x8 wd) {i16x8 lo,hi;for(int i=0;i<8;i++){int x=(int)q[i]*wq[i]+(int)p[i]*wp[i]+o[i];int y=(int)q[i+8]*wq[i]+(int)p[i+8]*wp[i]+o[i];lo[i]=(int16_t)mins(maxs(x,-32768),32767);hi[i]=(int16_t)mins(maxs(y,-32768),32767);lo[i] >>= wd[i];hi[i] >>= wd[i];}return packus16(lo,hi);}
-	static inline u8x16 maddshrC16(u8x16 q,u8x16 p,i16x8 w0,i16x8 w1,i16x8 w2,i16x8 w3,i16x8 o0,i16x8 o1,i16x8 wd) {i16x8 lo,hi;for(int i=0;i<8;i++){int x=(int)q[i]*w0[i]+(int)p[i]*w1[i]+o0[i];int y=(int)q[i+8]*w2[i]+(int)p[i+8]*w3[i]+o1[i];lo[i]=(int16_t)mins(maxs(x,-32768),32767);hi[i]=(int16_t)mins(maxs(y,-32768),32767);lo[i] >>= wd[i];hi[i] >>= wd[i];}return packus16(lo,hi);}
+	static inline void r5900_madd_weighted4(const uint8_t *q, const uint8_t *p,
+	                                               const int16_t *wq, const int16_t *wp,
+	                                               int32_t *out);
+	static inline u8x16 maddshrL(u8x16 q,u8x16 p,i16x8 wq,i16x8 wp,i16x8 o,i16x8 wd) {
+		i16x8 lo, hi;
+#if defined(__mips__) && defined(CRTUBE_R5900_MMI)
+		if (edge264_r5900_mmi_enabled(EDGE264_R5900_MMI_OP_WEIGHTED)) {
+			uint8_t qv[16], pv[16];
+			int16_t wqv[8], wpv[8];
+			memcpy(qv, &q, sizeof(qv)); memcpy(pv, &p, sizeof(pv));
+			memcpy(wqv, &wq, sizeof(wqv)); memcpy(wpv, &wp, sizeof(wpv));
+			for (int i = 0; i < 8; i += 4) {
+				int32_t sums[4];
+				r5900_madd_weighted4(qv + i, pv + i, wqv + i, wpv + i, sums);
+				for (int k = 0; k < 4; ++k) {
+					int v = (int)mins(maxs(sums[k] + o[i + k], -32768), 32767);
+					lo[i + k] = (int16_t)(v >> wd[i + k]);
+				}
+				r5900_madd_weighted4(qv + 8 + i, pv + 8 + i, wqv + i, wpv + i, sums);
+				for (int k = 0; k < 4; ++k) {
+					int v = (int)mins(maxs(sums[k] + o[i + k], -32768), 32767);
+					hi[i + k] = (int16_t)(v >> wd[i + k]);
+				}
+			}
+			return packus16(lo,hi);
+		}
+#endif
+		for(int i=0;i<8;i++){
+			int x=(int)q[i]*wq[i]+(int)p[i]*wp[i]+o[i];
+			int y=(int)q[i+8]*wq[i]+(int)p[i+8]*wp[i]+o[i];
+			lo[i]=(int16_t)mins(maxs(x,-32768),32767);
+			hi[i]=(int16_t)mins(maxs(y,-32768),32767);
+			lo[i] >>= wd[i]; hi[i] >>= wd[i];
+		}
+		return packus16(lo,hi);
+	}
+
+	static inline void r5900_madd_weighted4(const uint8_t *q, const uint8_t *p,
+	                                               const int16_t *wq, const int16_t *wp,
+	                                               int32_t *out) {
+        edge264_r5900_mmi_note(EDGE264_R5900_MMI_OP_WEIGHTED);
+		i16x8 samples = {q[0], p[0], q[1], p[1], q[2], p[2], q[3], p[3]};
+		i16x8 weights = {wq[0], wp[0], wq[1], wp[1], wq[2], wp[2], wq[3], wp[3]};
+		Edge264R5900Vec128 a, b, r;
+		memcpy(&a, &samples, sizeof(a));
+		memcpy(&b, &weights, sizeof(b));
+		r = edge264_r5900_madd_s16(a, b);
+		memcpy(out, &r, sizeof(r));
+	}
+	static inline u8x16 maddshrC16(u8x16 q,u8x16 p,i16x8 w0,i16x8 w1,i16x8 w2,i16x8 w3,i16x8 o0,i16x8 o1,i16x8 wd) {
+		i16x8 lo, hi;
+#if defined(__mips__) && defined(CRTUBE_R5900_MMI) && !defined(EDGE264_R5900_DISABLE_CHROMA_MC) && \
+    defined(EDGE264_R5900_ENABLE_CHROMA_WEIGHTED)
+		if (edge264_r5900_mmi_enabled(EDGE264_R5900_MMI_OP_WEIGHTED)) {
+			uint8_t qv[16], pv[16];
+			int16_t w0v[8], w1v[8], w2v[8], w3v[8];
+			memcpy(qv, &q, sizeof(qv)); memcpy(pv, &p, sizeof(pv));
+			memcpy(w0v, &w0, sizeof(w0v)); memcpy(w1v, &w1, sizeof(w1v));
+			memcpy(w2v, &w2, sizeof(w2v)); memcpy(w3v, &w3, sizeof(w3v));
+			for (int i = 0; i < 8; i += 4) {
+				int32_t sums[4];
+				r5900_madd_weighted4(qv + i, pv + i, w0v + i, w1v + i, sums);
+				for (int k = 0; k < 4; ++k) {
+					int v = (int)mins(maxs(sums[k] + o0[i + k], -32768), 32767);
+					lo[i + k] = (int16_t)(v >> wd[i + k]);
+				}
+				r5900_madd_weighted4(qv + 8 + i, pv + 8 + i, w2v + i, w3v + i, sums);
+				for (int k = 0; k < 4; ++k) {
+					int v = (int)mins(maxs(sums[k] + o1[i + k], -32768), 32767);
+					hi[i + k] = (int16_t)(v >> wd[i + k]);
+				}
+			}
+			return packus16(lo,hi);
+		}
+#endif
+		for(int i=0;i<8;i++){
+			int x=(int)q[i]*w0[i]+(int)p[i]*w1[i]+o0[i];
+			int y=(int)q[i+8]*w2[i]+(int)p[i+8]*w3[i]+o1[i];
+			lo[i]=(int16_t)mins(maxs(x,-32768),32767);
+			hi[i]=(int16_t)mins(maxs(y,-32768),32767);
+			lo[i] >>= wd[i]; hi[i] >>= wd[i];
+		}
+		return packus16(lo,hi);
+	}
+
+#if !defined(EDGE264_R5900_ENABLE_CHROMA_WEIGHTED) || defined(EDGE264_R5900_DISABLE_CHROMA_MC) || defined(EDGE264_R5900_DISABLE_CHROMA_WEIGHTED)
+	static inline u8x16 maddshrC8(u8x16 q,u8x16 p,i16x8 wq,i16x8 wp,i16x8 o,i16x8 wd) {
+		i16x8 lo, hi;
+		for (int i = 0; i < 8; ++i) {
+			int x = (int)q[i] * wq[i] + (int)p[i] * wp[i] + o[i];
+			int y = (int)q[i + 8] * wq[i] + (int)p[i + 8] * wp[i] + o[i];
+			lo[i] = (int16_t)mins(maxs(x, -32768), 32767);
+			hi[i] = (int16_t)mins(maxs(y, -32768), 32767);
+			lo[i] >>= wd[i];
+			hi[i] >>= wd[i];
+		}
+		return packus16(lo, hi);
+	}
+#else
 	#define maddshrC8 maddshrL
-	static inline i8x16 maddshrC4(u8x16 q,u8x16 p,i16x8 w0,i16x8 w1,i16x8 o,i16x8 wd) {i16x8 v;for(int i=0;i<8;i++){int x=(int)q[i]*w0[i]+(int)p[i]*w1[i]+o[i];v[i]=(int16_t)mins(maxs(x,-32768),32767);v[i] >>= wd[i];}return packus16(v,v);}
-	static inline u16x8 maddABCD(u8x16 ab,u8x16 cd,i8x16 sh,u8x16 AB,u8x16 CD) {u8x16 a=shuffle(ab,(u8x16)sh),c=shuffle(cd,(u8x16)sh);u16x8 r;for(int i=0;i<8;i++)r[i]=(unsigned)a[i]*AB[i]+(unsigned)a[i+8]*AB[i+8]+(unsigned)c[i]*CD[i]+(unsigned)c[i+8]*CD[i+8];return r;}
-	static inline i16x8 sixtapVlo(u8x16 a,u8x16 b,u8x16 c,u8x16 d,u8x16 e,u8x16 f) {i16x8 r;for(int i=0;i<8;i++)r[i]=(int)a[i]+f[i]-5*((int)b[i]+e[i])+20*((int)c[i]+d[i]);return r;}
-	static inline i16x8 sixtapVhi(u8x16 a,u8x16 b,u8x16 c,u8x16 d,u8x16 e,u8x16 f) {i16x8 r;for(int i=0;i<8;i++)r[i]=(int)a[i+8]+f[i+8]-5*((int)b[i+8]+e[i+8])+20*((int)c[i+8]+d[i+8]);return r;}
-	static inline i16x8 sixtapH4(u8x16 a,u8x16 b) {i16x8 r;for(int i=0;i<4;i++){int x[6]={a[i],a[i+1],a[i+2],a[i+3],a[i+4],a[i+5]};r[i]=(int16_t)(x[0]-5*x[1]+20*x[2]+20*x[3]-5*x[4]+x[5]);}for(int i=4;i<8;i++){int j=i-4;int x[6]={b[j],b[j+1],b[j+2],b[j+3],b[j+4],b[j+5]};r[i]=(int16_t)(x[0]-5*x[1]+20*x[2]+20*x[3]-5*x[4]+x[5]);}return r;}
-	static inline i16x8 sixtapH8(u8x16 a) {i16x8 r;for(int i=0;i<8;i++)r[i]=(int16_t)((int)a[i]-5*(int)a[i+1]+20*(int)a[i+2]+20*(int)a[i+3]-5*(int)a[i+4]+a[i+5]);return r;}
+#endif
+	static inline i8x16 maddshrC4(u8x16 q,u8x16 p,i16x8 w0,i16x8 w1,i16x8 o,i16x8 wd) {
+		i16x8 v;
+#if defined(__mips__) && defined(CRTUBE_R5900_MMI) && !defined(EDGE264_R5900_DISABLE_CHROMA_MC) && \
+    defined(EDGE264_R5900_ENABLE_CHROMA_WEIGHTED)
+		if (edge264_r5900_mmi_enabled(EDGE264_R5900_MMI_OP_WEIGHTED)) {
+			uint8_t qv[16], pv[16];
+			int16_t w0v[8], w1v[8], ov[8], wdv[8];
+			memcpy(qv, &q, sizeof(qv)); memcpy(pv, &p, sizeof(pv));
+			memcpy(w0v, &w0, sizeof(w0v)); memcpy(w1v, &w1, sizeof(w1v));
+			memcpy(ov, &o, sizeof(ov)); memcpy(wdv, &wd, sizeof(wdv));
+			for (int i = 0; i < 8; i += 4) {
+				int32_t sums[4];
+				r5900_madd_weighted4(qv + i, pv + i, w0v + i, w1v + i, sums);
+				for (int k = 0; k < 4; ++k) {
+					int x = (int)mins(maxs(sums[k] + ov[i + k], -32768), 32767);
+					v[i + k] = (int16_t)(x >> wdv[i + k]);
+				}
+			}
+			return packus16(v,v);
+		}
+#endif
+		for(int i=0;i<8;i++){
+			int x=(int)q[i]*w0[i]+(int)p[i]*w1[i]+o[i];
+			v[i]=(int16_t)mins(maxs(x,-32768),32767);
+			v[i] >>= wd[i];
+		}
+		return packus16(v,v);
+	}
+
+	static inline u16x8 maddABCD(u8x16 ab,u8x16 cd,i8x16 sh,u8x16 AB,u8x16 CD) {
+		u8x16 a = shuffle(ab, (u8x16)sh);
+		u8x16 c = shuffle(cd, (u8x16)sh);
+		#if defined(__mips__) && defined(CRTUBE_R5900_MMI) && \
+		    !defined(EDGE264_R5900_DISABLE_CHROMA_MC) && \
+		    !defined(EDGE264_R5900_DISABLE_CHROMA_MADDABCD)
+			/* Each PMADDH pair stays within signed 16-bit range:
+			 * 2 * 255 * 64 = 32640 for H.264 chroma coefficients. */
+			return (u16x8)maddubs(a, (i8x16)AB) +
+			       (u16x8)maddubs(c, (i8x16)CD);
+		#else
+			u16x8 r;
+			for(int i=0;i<8;i++)
+				r[i]=(unsigned)a[i]*AB[i]+(unsigned)a[i+8]*AB[i+8]+
+				     (unsigned)c[i]*CD[i]+(unsigned)c[i+8]*CD[i+8];
+			return r;
+		#endif
+	}
+	/* Six-tap vertical interpolation: pair the symmetric taps and use the
+	 * R5900 PMADDH-backed maddubs primitive instead of eight scalar formulas. */
+	static inline i16x8 sixtapVlo(u8x16 a,u8x16 b,u8x16 c,u8x16 d,u8x16 e,u8x16 f) {
+		i8x16 af = ziplo8(a, f);
+		i8x16 be = ziplo8(b, e);
+		i8x16 cd = ziplo8(c, d);
+		return maddubs(af, r5900_sixtap_mul1) +
+		       maddubs(cd, r5900_sixtap_mul20) +
+		       maddubs(be, r5900_sixtap_mul5);
+	}
+	static inline i16x8 sixtapVhi(u8x16 a,u8x16 b,u8x16 c,u8x16 d,u8x16 e,u8x16 f) {
+		i8x16 af = ziphi8(a, f);
+		i8x16 be = ziphi8(b, e);
+		i8x16 cd = ziphi8(c, d);
+		return maddubs(af, r5900_sixtap_mul1) +
+		       maddubs(cd, r5900_sixtap_mul20) +
+		       maddubs(be, r5900_sixtap_mul5);
+	}
+	static const i8x16 r5900_sixtap_h1 = {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1};
+	static const i8x16 r5900_sixtap_h5 = {-5,-5,-5,-5,-5,-5,-5,-5,-5,-5,-5,-5,-5,-5,-5,-5};
+	static const i8x16 r5900_sixtap_h20 = {20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20};
+	static inline i16x8 sixtapH8(u8x16 a) {
+		/* Pair symmetric taps: (x0+x5) - 5*(x1+x4) + 20*(x2+x3). */
+		i16x8 af = maddubs(ziplo8(a, shr128(a, 5)), r5900_sixtap_h1);
+		i16x8 be = maddubs(ziplo8(shr128(a, 1), shr128(a, 4)), r5900_sixtap_h5);
+		i16x8 cd = maddubs(ziplo8(shr128(a, 2), shr128(a, 3)), r5900_sixtap_h20);
+		return adds16(adds16(af, be), cd);
+	}
+	static inline i16x8 sixtapH4(u8x16 a,u8x16 b) {
+		i16x8 x = sixtapH8(a), y = sixtapH8(b);
+		return (i16x8){x[0],x[1],x[2],x[3],y[0],y[1],y[2],y[3]};
+	}
 	#define SIXTAPH16(r0,r1,l0,lG) i16x8 r0=sixtapH8(l0); i16x8 r1=sixtapH8(shrd128(l0,lG,8))
 #elif SIMD == CLANG
 	#define shrrpus16(a, b, i) packus16(((i16x8)(a) + (1 << (i - 1))) >> i, ((i16x8)(b) + (1 << (i - 1))) >> i)
@@ -453,7 +669,50 @@ static void decode_inter_luma(int mode, int h, size_t sstride, const uint8_t * r
 	const uint8_t * restrict src0 = src2 - 2;
 	DECL_SSTRIDE(sstride);
 	DECL_DSTRIDE(dstride);
-	
+
+#if SIMD == R5900 && defined(CRTUBE_EDGE264_VU_OFFLOAD)
+	/*
+	 * Offload the 16-pixel-wide vertical half-pel stage in four-row bands.
+	 * VU0 and VU1 work on separate bands concurrently. The EE retains the
+	 * bit-exact H.264 rounding/clipping, qpel averaging and weighted blend.
+	 */
+	if ((mode == INTER_16xH_QPEL_01 ||
+	     mode == INTER_16xH_QPEL_02 ||
+	     mode == INTER_16xH_QPEL_03) &&
+	    h >= 4 && h <= 16 && (h & 3) == 0) {
+		int16_t vu_sums[16][16] __attribute__((aligned(16)));
+		if (crtube_vu_inter_luma_vertical(src2, (unsigned)sstride,
+		                                  (unsigned)h, &vu_sums[0][0], 16u) == 0) {
+			int row;
+			for (row = 0; row < h; ++row) {
+				uint8_t prediction[16] __attribute__((aligned(16)));
+				const uint8_t *current = src2 + (size_t)row * sstride;
+				const uint8_t *next = current + sstride;
+				int col;
+				for (col = 0; col < 16; ++col) {
+					int filtered = (vu_sums[row][col] + 16) >> 5;
+					int base;
+					if (filtered < 0) filtered = 0;
+					if (filtered > 255) filtered = 255;
+					if (mode == INTER_16xH_QPEL_01)
+						base = current[col];
+					else if (mode == INTER_16xH_QPEL_03)
+						base = next[col];
+					else
+						base = filtered;
+					prediction[col] = (uint8_t)((base + filtered + 1) >> 1);
+				}
+				{
+					u8x16 p = loadu128(prediction);
+					u8x16 q = loadu128(dst + (size_t)row * dstride);
+					*(i8x16 *)(dst + (size_t)row * dstride) = maddshrL(q, p, w0, w1, o, wd);
+				}
+			}
+			return;
+		}
+	}
+#endif
+
 	switch (mode) {
 	default: __builtin_unreachable();
 	
@@ -1118,7 +1377,7 @@ static void decode_inter_chroma(int w, int h, size_t sstride, const uint8_t *src
  * | bipred=2 | no_weight  | no_weight    | no_weight  | implicit2    |
  * +----------+------------+--------------+------------+--------------+
  */
-static void noinline decode_inter(Edge264Context *ctx, int i, int w, int h) {
+static void noinline decode_inter_profile_impl(Edge264Context *ctx, int i, int w, int h) {
 	static int8_t shift_Y_8bit[46] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15};
 	static int8_t shift_C_8bit[22] = {0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 7, 7, 7, 7, 7, 7, 7};
 	
@@ -1303,3 +1562,14 @@ static void noinline decode_inter(Edge264Context *ctx, int i, int w, int h) {
 	}
 	#endif
 }
+
+#if defined(CRTUBE_EDGE264_PROFILE)
+static void noinline decode_inter(Edge264Context *ctx, int i, int w, int h) {
+	uint64_t _profile_start = edge264_profile_begin();
+	decode_inter_profile_impl(ctx, i, w, h);
+	edge264_profile_accumulate(0, _profile_start);
+}
+#else
+static void noinline decode_inter(Edge264Context *ctx, int i, int w, int h) { decode_inter_profile_impl(ctx, i, w, h); }
+#endif
+

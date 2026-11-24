@@ -108,6 +108,8 @@
 
 #include "../edge264.h"
 
+uint64_t crtube_edge264_profile_ticks(void);
+
 
 
 /**
@@ -1190,10 +1192,12 @@ static const int8_t shz_mask[48] = {
 	static inline u16x8 abs16(i16x8 a) { u16x8 r; for(int i=0;i<8;i++)r[i]=(uint16_t)(a[i]<0?-(int)a[i]:a[i]); return r; }
 	static inline i16x8 adds16(i16x8 a,i16x8 b) {
 		#if defined(__mips__) && defined(CRTUBE_R5900_MMI)
-			Edge264R5900Vec128 x,y,z; memcpy(&x,&a,16); memcpy(&y,&b,16); z=edge264_r5900_add_s16_sat(x,y); memcpy(&a,&z,16); return a;
-		#else
-			i16x8 r; for(int i=0;i<8;i++){int v=(int)a[i]+b[i];r[i]=(int16_t)mins(maxs(v,-32768),32767);} return r;
+			if (edge264_r5900_mmi_enabled(EDGE264_R5900_MMI_OP_RESIDUAL)) {
+                edge264_r5900_mmi_note(EDGE264_R5900_MMI_OP_RESIDUAL);
+				Edge264R5900Vec128 x,y,z; memcpy(&x,&a,16); memcpy(&y,&b,16); z=edge264_r5900_add_s16_sat(x,y); memcpy(&a,&z,16); return a;
+			}
 		#endif
+		i16x8 r; for(int i=0;i<8;i++){int v=(int)a[i]+b[i];r[i]=(int16_t)mins(maxs(v,-32768),32767);} return r;
 	}
 	static inline u8x16 avgu8(u8x16 a,u8x16 b) {
 #if defined(__mips__) && defined(CRTUBE_R5900_MMI)
@@ -1235,15 +1239,17 @@ static const int8_t shz_mask[48] = {
 	static inline i16x8 packs32(i32x4 a,i32x4 b);
 	static inline i16x8 maddubs(u8x16 a,i8x16 b) {
 		#if defined(__mips__) && defined(CRTUBE_R5900_MMI)
-			i16x8 al=(i16x8)cvtlo8u16(a), ah=(i16x8)cvthi8u16(a);
-			i16x8 bl=cvtlo8s16(b), bh=cvthi8s16(b);
-			Edge264R5900Vec128 x,y,z0,z1; i32x4 lo,hi;
-			memcpy(&x,&al,16); memcpy(&y,&bl,16); z0=edge264_r5900_madd_s16(x,y);
-			memcpy(&x,&ah,16); memcpy(&y,&bh,16); z1=edge264_r5900_madd_s16(x,y);
-			memcpy(&lo,&z0,16); memcpy(&hi,&z1,16); return packs32(lo,hi);
-		#else
-			i16x8 r;for(int i=0;i<8;i++){int v=(int)a[2*i]*b[2*i]+(int)a[2*i+1]*b[2*i+1];r[i]=(int16_t)mins(maxs(v,-32768),32767);}return r;
+			if (edge264_r5900_mmi_enabled(EDGE264_R5900_MMI_OP_CHROMA)) {
+                edge264_r5900_mmi_note(EDGE264_R5900_MMI_OP_CHROMA);
+				i16x8 al=(i16x8)cvtlo8u16(a), ah=(i16x8)cvthi8u16(a);
+				i16x8 bl=cvtlo8s16(b), bh=cvthi8s16(b);
+				Edge264R5900Vec128 x,y,z0,z1; i32x4 lo,hi;
+				memcpy(&x,&al,16); memcpy(&y,&bl,16); z0=edge264_r5900_madd_s16(x,y);
+				memcpy(&x,&ah,16); memcpy(&y,&bh,16); z1=edge264_r5900_madd_s16(x,y);
+				memcpy(&lo,&z0,16); memcpy(&hi,&z1,16); return packs32(lo,hi);
+			}
 		#endif
+		i16x8 r;for(int i=0;i<8;i++){int v=(int)a[2*i]*b[2*i]+(int)a[2*i+1]*b[2*i+1];r[i]=(int16_t)mins(maxs(v,-32768),32767);}return r;
 	}
 	static inline u16x8 maddubx(u8x16 a,u8x16 b) {u16x8 r;for(int i=0;i<8;i++)r[i]=(unsigned)a[2*i]*b[2*i]+(unsigned)a[2*i+1]*b[2*i+1];return r;}
 	static inline i16x8 maddxbs(u8x16 a,i8x16 b) {return maddubs(a,b);}
@@ -1251,12 +1257,41 @@ static const int8_t shz_mask[48] = {
 	static inline i8x16 max8(i8x16 a,i8x16 b) {i8x16 r;for(int i=0;i<16;i++)r[i]=a[i]>b[i]?a[i]:b[i];return r;}
 	static inline i16x8 min16(i16x8 a,i16x8 b) {i16x8 r;for(int i=0;i<8;i++)r[i]=a[i]<b[i]?a[i]:b[i];return r;}
 	static inline i16x8 max16(i16x8 a,i16x8 b) {i16x8 r;for(int i=0;i<8;i++)r[i]=a[i]>b[i]?a[i]:b[i];return r;}
-	static inline u8x16 minu8(u8x16 a,u8x16 b) {u8x16 r;for(int i=0;i<16;i++)r[i]=a[i]<b[i]?a[i]:b[i];return r;}
-	static inline u8x16 maxu8(u8x16 a,u8x16 b) {u8x16 r;for(int i=0;i<16;i++)r[i]=a[i]>b[i]?a[i]:b[i];return r;}
+	static inline u8x16 minu8(u8x16 a,u8x16 b) {
+#if defined(__mips__) && defined(CRTUBE_R5900_MMI) && !defined(EDGE264_R5900_DISABLE_MINMAX_U8)
+		if (edge264_r5900_mmi_enabled(EDGE264_R5900_MMI_OP_MINMAX)) {
+            edge264_r5900_mmi_note(EDGE264_R5900_MMI_OP_MINMAX);
+			Edge264R5900Vec128 x,y,z; memcpy(&x,&a,16); memcpy(&y,&b,16);
+			z=edge264_r5900_min_u8(x,y); memcpy(&a,&z,16); return a;
+		}
+#endif
+		u8x16 r;for(int i=0;i<16;i++)r[i]=a[i]<b[i]?a[i]:b[i];return r;
+	}
+	static inline u8x16 maxu8(u8x16 a,u8x16 b) {
+#if defined(__mips__) && defined(CRTUBE_R5900_MMI) && !defined(EDGE264_R5900_DISABLE_MINMAX_U8)
+		if (edge264_r5900_mmi_enabled(EDGE264_R5900_MMI_OP_MINMAX)) {
+            edge264_r5900_mmi_note(EDGE264_R5900_MMI_OP_MINMAX);
+			Edge264R5900Vec128 x,y,z; memcpy(&x,&a,16); memcpy(&y,&b,16);
+			z=edge264_r5900_max_u8(x,y); memcpy(&a,&z,16); return a;
+		}
+#endif
+		u8x16 r;for(int i=0;i<16;i++)r[i]=a[i]>b[i]?a[i]:b[i];return r;
+	}
 	static inline unsigned movemask(i8x16 a) {unsigned r=0;for(int i=0;i<16;i++)if(a[i]<0)r|=1u<<i;return r;}
 	static inline i8x16 packs16(i16x8 a,i16x8 b) {i8x16 r;for(int i=0;i<8;i++){r[i]=mins(maxs(a[i],-128),127);r[i+8]=mins(maxs(b[i],-128),127);}return r;}
 	static inline i16x8 packs32(i32x4 a,i32x4 b) {i16x8 r;for(int i=0;i<4;i++){r[i]=mins(maxs(a[i],-32768),32767);r[i+4]=mins(maxs(b[i],-32768),32767);}return r;}
-	static inline u8x16 packus16(i16x8 a,i16x8 b) {u8x16 r;for(int i=0;i<8;i++){r[i]=mins(maxs(a[i],0),255);r[i+8]=mins(maxs(b[i],0),255);}return r;}
+	static inline u8x16 packus16(i16x8 a,i16x8 b) {
+        /* Keep packing scalar until the full 128-bit MMI PPACB path has
+         * its own EE self-test. The previous split-uint64 asm operands did
+         * not describe complete R5900 MMI registers. */
+        u8x16 r;
+        for (int i = 0; i < 8; ++i) {
+            r[i] = (uint8_t)mins(maxs(a[i], 0), 255);
+            r[i + 8] = (uint8_t)mins(maxs(b[i], 0), 255);
+        }
+        return r;
+    }
+
 	static inline i8x16 set8(int x) {return (i8x16){x,x,x,x,x,x,x,x,x,x,x,x,x,x,x,x};}
 	static inline i16x8 set16(int x) {return (i16x8){x,x,x,x,x,x,x,x};}
 	static inline i32x4 set32(int x) {return (i32x4){x,x,x,x};}

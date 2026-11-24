@@ -1,10 +1,22 @@
 #include "h264_edge264.h"
 
 #include <errno.h>
+#include <malloc.h>
 #include <stdlib.h>
 #include <string.h>
+#if defined(CRTUBE_EDGE264_PROFILE)
+#include <timer.h>
+#endif
 
 #include "edge264.h"
+
+#if defined(CRTUBE_EDGE264_PROFILE)
+uint64_t crtube_edge264_profile_ticks(void)
+{
+    return (uint64_t)GetTimerSystemTime();
+}
+#endif
+
 
 typedef struct crtube_h264_edge264_allocator {
     size_t current_bytes, peak_bytes, allocation_limit;
@@ -31,7 +43,8 @@ static void edge264_frame_alloc(
     crtube_h264_edge264_allocator_t *a =
         (crtube_h264_edge264_allocator_t *)opaque;
     const size_t alignment = 64u;
-    size_t total = (size_t)samples_size + (size_t)mbs_size;
+    size_t samples_span;
+    size_t total;
     size_t overhead = sizeof(crtube_h264_edge264_allocation_t) + alignment - 1u;
     uintptr_t aligned;
     void *raw;
@@ -39,6 +52,17 @@ static void edge264_frame_alloc(
     (void)errno_on_fail;
     *samples = NULL;
     *mbs = NULL;
+    if ((size_t)samples_size > SIZE_MAX - (alignment - 1u)) {
+        if (a) a->allocation_failures++;
+        return;
+    }
+    samples_span = ((size_t)samples_size + alignment - 1u) &
+                   ~(alignment - 1u);
+    if (samples_span > SIZE_MAX - (size_t)mbs_size) {
+        if (a) a->allocation_failures++;
+        return;
+    }
+    total = samples_span + (size_t)mbs_size;
     if (!a || total < samples_size || total > SIZE_MAX - overhead ||
         (a->allocation_limit &&
          (a->current_bytes > a->allocation_limit ||
@@ -57,7 +81,7 @@ static void edge264_frame_alloc(
     record->raw = raw;
     record->bytes = total;
     *samples = (void *)aligned;
-    *mbs = (uint8_t *)*samples + samples_size;
+    *mbs = (uint8_t *)*samples + samples_span;
     a->current_bytes += total;
     if (a->current_bytes > a->peak_bytes) a->peak_bytes = a->current_bytes;
     a->allocation_count++;
@@ -225,9 +249,10 @@ int crtube_h264_edge264_push_annexb(
        contains the final NAL bytes. Give it readable zero padding so callers
        can pass ordinary MP4/network buffers without hidden over-read hazards. */
     if (size + 16u > decoder->input_capacity) {
-        uint8_t *grown = (uint8_t *)realloc(decoder->input_buffer, size + 16u);
+        uint8_t *grown = (uint8_t *)memalign(64u, size + 16u);
         if (!grown)
             return -6;
+        free(decoder->input_buffer);
         decoder->input_buffer = grown;
         decoder->input_capacity = size + 16u;
     }

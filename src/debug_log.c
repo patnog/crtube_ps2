@@ -7,6 +7,12 @@
 
 static FILE *g_log_file;
 static int g_log_started;
+static int g_log_enabled = 1;
+
+void crtube_log_set_enabled(int enabled)
+{
+    g_log_enabled = enabled != 0;
+}
 
 int crtube_log_init(const char *unused_path)
 {
@@ -30,7 +36,7 @@ void crtube_log(const char *format, ...)
 {
     va_list args;
 
-    if (format == NULL || g_log_file == NULL)
+    if (format == NULL || g_log_file == NULL || !g_log_enabled)
         return;
 
     va_start(args, format);

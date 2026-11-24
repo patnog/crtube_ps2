@@ -1,5 +1,11 @@
 #include "../third_party/edge264/src/edge264_residual.c"
 #include <stdio.h>
+#ifdef CRTUBE_R5900_SMB_LOG
+#include "../include/debug_log.h"
+#define TEST_LOG(...) crtube_log(__VA_ARGS__)
+#else
+#define TEST_LOG(...) printf(__VA_ARGS__)
+#endif
 #include <stdint.h>
 #include <string.h>
 
@@ -26,7 +32,7 @@ static int test4(void) {
         for(i=0;i<16;i++) ctx.c[i]=(int32_t)((int)(rnd()%2049)-1024);
         add_idct4x4(&ctx,0,-1,ctx.samples_mb[0]);
         digest4=crc32_update(digest4,buf,sizeof(buf));
-        for(i=0;i<16;i++) if(ctx.c[i]!=0) { fprintf(stderr,"4x4 coefficients not cleared iter=%u\n",it); return 0; }
+        for(i=0;i<16;i++) if(ctx.c[i]!=0) { TEST_LOG("IDCT 4x4 coefficients not cleared iter=%u\n",it); return 0; }
     }
     return 1;
 }
@@ -40,13 +46,18 @@ static int test8(void) {
         for(i=0;i<64;i++) ctx.c[i]=(int32_t)((int)(rnd()%513)-256);
         add_idct8x8(&ctx,0,ctx.samples_mb[0]);
         digest8=crc32_update(digest8,buf,sizeof(buf));
-        for(i=0;i<64;i++) if(ctx.c[i]!=0) { fprintf(stderr,"8x8 coefficients not cleared iter=%u\n",it); return 0; }
+        for(i=0;i<64;i++) if(ctx.c[i]!=0) { TEST_LOG("IDCT 8x8 coefficients not cleared iter=%u\n",it); return 0; }
     }
     return 1;
 }
 int main(void) {
     digest4=digest8=0xffffffffu;
     if(!test4()||!test8()) return 1;
-    printf("idct4=%08x idct8=%08x\n",(unsigned)(digest4^0xffffffffu),(unsigned)(digest8^0xffffffffu));
+    TEST_LOG("idct4=%08x idct8=%08x\n",(unsigned)(digest4^0xffffffffu),(unsigned)(digest8^0xffffffffu));
+    if ((digest4 ^ 0xffffffffu) != 0xdf46f9e8u ||
+        (digest8 ^ 0xffffffffu) != 0x49e43d30u) {
+        TEST_LOG("IDCT function reference CRC mismatch\n");
+        return 2;
+    }
     return 0;
 }

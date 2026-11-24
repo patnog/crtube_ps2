@@ -1,4 +1,5 @@
 #include "edge264_internal.h"
+#include "../ps2/edge264_r5900_mmi.h"
 
 #if SIMD == SSE
 	#define addlou8s16(a, b) (cvtlo8u16(a) + (i16x8)b)
@@ -59,16 +60,160 @@
 		return wasm_i16x8_narrow_i32x4(wasm_i32x4_shr(a + off, sh), wasm_i32x4_shr(b + off, sh));
 	}
 #elif SIMD == R5900
-	#define addlou8s16(a,b) ((i16x8)cvtlo8u16(a)+(i16x8)(b))
-	#define addhiu8s16(a,b) ((i16x8)cvthi8u16(a)+(i16x8)(b))
-	static inline i16x8 broadcastlo32(i16x8 a) {return (i16x8){a[0],a[0],a[0],a[0],a[2],a[2],a[2],a[2]};}
-	static inline i16x8 broadcasthi32(i16x8 a) {return (i16x8){a[4],a[4],a[4],a[4],a[6],a[6],a[6],a[6]};}
-	#define mullou8(a,b) (cvtlo8u16(a)*cvtlo8u16(b))
-	#define mulhiu8(a,b) (cvthi8u16(a)*cvthi8u16(b))
-	#define shlrrs32(a,l,r,o) ((((i32x4)(a)<<(l))+(o))>>(r))
-	#define shrrs32(a,i,o) (((i32x4)(a)+(o))>>(i))
-	#define shrps32(a,b,i) packs32((i32x4)(a)>>(i),(i32x4)(b)>>(i))
-	static inline i16x8 scale32(i32x4 c0,i32x4 c1,u16x8 ls,i32x4 off,i32x4 sh) {i16x8 r;for(int i=0;i<4;i++){int32_t lo=((int32_t)ls[i]*c0[i]+off[i])>>sh[i];int32_t hi=((int32_t)ls[i+4]*c1[i]+off[i])>>sh[i];r[i]=(int16_t)mins(maxs(lo,-32768),32767);r[i+4]=(int16_t)mins(maxs(hi,-32768),32767);}return r;}
+#if defined(__mips__) && defined(CRTUBE_R5900_MMI)
+    static inline Edge264R5900Vec128 r5900_vec_from_i32(i32x4 value) {
+        Edge264R5900Vec128 result;
+        memcpy(&result, &value, 16);
+        return result;
+    }
+    static inline Edge264R5900Vec128 r5900_vec_from_i16(i16x8 value) {
+        Edge264R5900Vec128 result;
+        memcpy(&result, &value, 16);
+        return result;
+    }
+    static inline i32x4 r5900_i32_from_vec(Edge264R5900Vec128 value) {
+        i32x4 result;
+        memcpy(&result, &value, 16);
+        return result;
+    }
+    static inline i16x8 r5900_i16_from_vec(Edge264R5900Vec128 value) {
+        i16x8 result;
+        memcpy(&result, &value, 16);
+        return result;
+    }
+    static inline i32x4 r5900_add32(i32x4 a, i32x4 b) {
+        if (edge264_r5900_mmi_enabled(EDGE264_R5900_MMI_OP_RESIDUAL)) {
+            edge264_r5900_mmi_note(EDGE264_R5900_MMI_OP_RESIDUAL);
+            return r5900_i32_from_vec(edge264_r5900_add_s32(
+                r5900_vec_from_i32(a), r5900_vec_from_i32(b)));
+        }
+        return a + b;
+    }
+    static inline i32x4 r5900_sub32(i32x4 a, i32x4 b) {
+        if (edge264_r5900_mmi_enabled(EDGE264_R5900_MMI_OP_RESIDUAL)) {
+            edge264_r5900_mmi_note(EDGE264_R5900_MMI_OP_RESIDUAL);
+            return r5900_i32_from_vec(edge264_r5900_sub_s32(
+                r5900_vec_from_i32(a), r5900_vec_from_i32(b)));
+        }
+        return a - b;
+    }
+    static inline i32x4 r5900_sar32_1(i32x4 a) {
+        if (edge264_r5900_mmi_enabled(EDGE264_R5900_MMI_OP_RESIDUAL)) {
+            edge264_r5900_mmi_note(EDGE264_R5900_MMI_OP_RESIDUAL);
+            return r5900_i32_from_vec(edge264_r5900_sar_s32_1(
+                r5900_vec_from_i32(a)));
+        }
+        return a >> 1;
+    }
+    static inline i16x8 r5900_add16(i16x8 a, i16x8 b) {
+        if (edge264_r5900_mmi_enabled(EDGE264_R5900_MMI_OP_RESIDUAL)) {
+            edge264_r5900_mmi_note(EDGE264_R5900_MMI_OP_RESIDUAL);
+            return r5900_i16_from_vec(edge264_r5900_add_s16(
+                r5900_vec_from_i16(a), r5900_vec_from_i16(b)));
+        }
+        return a + b;
+    }
+    static inline i16x8 r5900_sub16(i16x8 a, i16x8 b) {
+        if (edge264_r5900_mmi_enabled(EDGE264_R5900_MMI_OP_RESIDUAL)) {
+            edge264_r5900_mmi_note(EDGE264_R5900_MMI_OP_RESIDUAL);
+            return r5900_i16_from_vec(edge264_r5900_sub_s16(
+                r5900_vec_from_i16(a), r5900_vec_from_i16(b)));
+        }
+        return a - b;
+    }
+    static inline i16x8 r5900_sar16_1(i16x8 a) {
+        if (edge264_r5900_mmi_enabled(EDGE264_R5900_MMI_OP_RESIDUAL)) {
+            edge264_r5900_mmi_note(EDGE264_R5900_MMI_OP_RESIDUAL);
+            return r5900_i16_from_vec(edge264_r5900_sar_s16_1(
+                r5900_vec_from_i16(a)));
+        }
+        return a >> 1;
+    }
+    static inline i16x8 r5900_sar16_2(i16x8 a) {
+        if (edge264_r5900_mmi_enabled(EDGE264_R5900_MMI_OP_RESIDUAL)) {
+            edge264_r5900_mmi_note(EDGE264_R5900_MMI_OP_RESIDUAL);
+            return r5900_i16_from_vec(edge264_r5900_sar_s16_2(
+                r5900_vec_from_i16(a)));
+        }
+        return a >> 2;
+    }
+    static inline i16x8 r5900_sar16_6(i16x8 a) {
+        if (edge264_r5900_mmi_enabled(EDGE264_R5900_MMI_OP_RESIDUAL)) {
+            edge264_r5900_mmi_note(EDGE264_R5900_MMI_OP_RESIDUAL);
+            return r5900_i16_from_vec(edge264_r5900_sar_s16_6(
+                r5900_vec_from_i16(a)));
+        }
+        return a >> 6;
+    }
+    static inline void r5900_addsub16(i16x8 a, i16x8 b,
+                                      i16x8 *sum, i16x8 *diff) {
+        *sum = r5900_add16(a, b);
+        *diff = r5900_sub16(a, b);
+    }
+    static inline void r5900_addsub32(i32x4 a, i32x4 b,
+                                      i32x4 *sum, i32x4 *diff) {
+        *sum = r5900_add32(a, b);
+        *diff = r5900_sub32(a, b);
+    }
+
+#else
+    static inline i32x4 r5900_add32(i32x4 a, i32x4 b) { return a + b; }
+    static inline i32x4 r5900_sub32(i32x4 a, i32x4 b) { return a - b; }
+    static inline i32x4 r5900_sar32_1(i32x4 a) { return a >> 1; }
+    static inline i16x8 r5900_add16(i16x8 a, i16x8 b) { return a + b; }
+    static inline i16x8 r5900_sub16(i16x8 a, i16x8 b) { return a - b; }
+    static inline i16x8 r5900_sar16_1(i16x8 a) { return a >> 1; }
+    static inline i16x8 r5900_sar16_2(i16x8 a) { return a >> 2; }
+    static inline i16x8 r5900_sar16_6(i16x8 a) { return a >> 6; }
+    static inline void r5900_addsub16(i16x8 a, i16x8 b,
+                                      i16x8 *sum, i16x8 *diff) {
+        *sum = a + b; *diff = a - b;
+    }
+    static inline void r5900_addsub32(i32x4 a, i32x4 b,
+                                      i32x4 *sum, i32x4 *diff) {
+        *sum = a + b; *diff = a - b;
+    }
+#endif
+
+    static inline i16x8 r5900_add_u8_s16_half(i8x16 pixels, i16x8 residual,
+                                               unsigned half) {
+        const uint8_t *src = (const uint8_t *)&pixels + (half ? 8 : 0);
+        i16x8 result;
+        for (unsigned i = 0; i < 8; ++i)
+            result[i] = (int16_t)((int16_t)src[i] + residual[i]);
+        return result;
+    }
+    #define addlou8s16(a,b) r5900_add_u8_s16_half((a), (b), 0)
+    #define addhiu8s16(a,b) r5900_add_u8_s16_half((a), (b), 1)
+    static inline i16x8 broadcastlo32(i16x8 a) {return (i16x8){a[0],a[0],a[0],a[0],a[2],a[2],a[2],a[2]};}
+    static inline i16x8 broadcasthi32(i16x8 a) {return (i16x8){a[4],a[4],a[4],a[4],a[6],a[6],a[6],a[6]};}
+    #define mullou8(a,b) (cvtlo8u16(a)*cvtlo8u16(b))
+    #define mulhiu8(a,b) (cvthi8u16(a)*cvthi8u16(b))
+    #define shlrrs32(a,l,r,o) ((((i32x4)(a)<<(l))+(o))>>(r))
+    #define shrrs32(a,i,o) (((i32x4)(a)+(o))>>(i))
+    #define shrps32(a,b,i) packs32((i32x4)(a)>>(i),(i32x4)(b)>>(i))
+    static inline i16x8 scale32(i32x4 c0, i32x4 c1, u16x8 ls,
+                                i32x4 off, i32x4 sh) {
+        i16x8 r;
+        int32_t v0 = ((int32_t)ls[0] * c0[0] + off[0]) >> sh[0];
+        int32_t v1 = ((int32_t)ls[1] * c0[1] + off[1]) >> sh[1];
+        int32_t v2 = ((int32_t)ls[2] * c0[2] + off[2]) >> sh[2];
+        int32_t v3 = ((int32_t)ls[3] * c0[3] + off[3]) >> sh[3];
+        int32_t v4 = ((int32_t)ls[4] * c1[0] + off[0]) >> sh[0];
+        int32_t v5 = ((int32_t)ls[5] * c1[1] + off[1]) >> sh[1];
+        int32_t v6 = ((int32_t)ls[6] * c1[2] + off[2]) >> sh[2];
+        int32_t v7 = ((int32_t)ls[7] * c1[3] + off[3]) >> sh[3];
+        r[0] = (int16_t)mins(maxs(v0, -32768), 32767);
+        r[1] = (int16_t)mins(maxs(v1, -32768), 32767);
+        r[2] = (int16_t)mins(maxs(v2, -32768), 32767);
+        r[3] = (int16_t)mins(maxs(v3, -32768), 32767);
+        r[4] = (int16_t)mins(maxs(v4, -32768), 32767);
+        r[5] = (int16_t)mins(maxs(v5, -32768), 32767);
+        r[6] = (int16_t)mins(maxs(v6, -32768), 32767);
+        r[7] = (int16_t)mins(maxs(v7, -32768), 32767);
+        return r;
+    }
+
 #elif SIMD == CLANG
 	#define addlou8s16(a, b) ((i16x8)cvtlo8u16(a) + (i16x8)(b))
 	#define addhiu8s16(a, b) ((i16x8)cvthi8u16(a) + (i16x8)(b))
@@ -83,6 +228,16 @@
 		// convertvector is sufficient here but packs should be more common in ISAs
 		return packs32(((i32x4)cvtlo16u32(ls) * c0 + off) >> sh, ((i32x4)cvthi16u32(ls) * c1 + off) >> sh);
 	}
+#endif
+
+#if SIMD != R5900
+static inline i32x4 r5900_add32(i32x4 a, i32x4 b) { return a + b; }
+static inline i32x4 r5900_sub32(i32x4 a, i32x4 b) { return a - b; }
+static inline void r5900_addsub32(i32x4 a, i32x4 b, i32x4 *sum, i32x4 *diff)
+{
+	*sum = a + b;
+	*diff = a - b;
+}
 #endif
 
 static const i8x16 normAdjust4x4[6] = {
@@ -116,7 +271,7 @@ static const i8x16 normAdjust8x8[12] = {
  * Here we try to stay close to the spec's pseudocode, avoiding minor
  * optimisations that would make the code hard to understand.
  */
-static noinline void add_idct4x4(Edge264Context *ctx, int iYCbCr, int DCidx, uint8_t *p)
+static noinline void add_idct4x4_profile_impl(Edge264Context *ctx, int iYCbCr, int DCidx, uint8_t *p)
 {
 	// loading and scaling
 	unsigned qP = ctx->t.QP[iYCbCr];
@@ -135,6 +290,16 @@ static noinline void add_idct4x4(Edge264Context *ctx, int iYCbCr, int DCidx, uin
 		d0[0] = ctx->c[16 + DCidx];
 	
 	// horizontal 1D transform
+#if SIMD == R5900
+	i32x4 e0, e1;
+	r5900_addsub32(d0, d2, &e0, &e1);
+	i32x4 e2 = r5900_sub32(r5900_sar32_1(d1), d3);
+	i32x4 e3 = r5900_add32(r5900_sar32_1(d3), d1);
+	i32x4 f0 = r5900_add32(e0, e3);
+	i32x4 f1 = r5900_add32(e1, e2);
+	i32x4 f2 = r5900_sub32(e1, e2);
+	i32x4 f3 = r5900_sub32(e0, e3);
+#else
 	i32x4 e0 = d0 + d2;
 	i32x4 e1 = d0 - d2;
 	i32x4 e2 = (d1 >> 1) - d3;
@@ -143,6 +308,7 @@ static noinline void add_idct4x4(Edge264Context *ctx, int iYCbCr, int DCidx, uin
 	i32x4 f1 = e1 + e2;
 	i32x4 f2 = e1 - e2;
 	i32x4 f3 = e0 - e3;
+#endif
 	
 	// matrix transposition
 	i32x4 x0 = ziplo32(f0, f1);
@@ -155,6 +321,15 @@ static noinline void add_idct4x4(Edge264Context *ctx, int iYCbCr, int DCidx, uin
 	f3 = ziphi64(x2, x3);
 	
 	// vertical 1D transform
+#if SIMD == R5900
+	i32x4 g0, g1;
+	r5900_addsub32(f0, f2, &g0, &g1);
+	i32x4 g2 = r5900_sub32(r5900_sar32_1(f1), f3);
+	i32x4 g3 = r5900_add32(r5900_sar32_1(f3), f1);
+	i32x4 h0, h3, h1, h2;
+	r5900_addsub32(g0, g3, &h0, &h3);
+	r5900_addsub32(g1, g2, &h1, &h2);
+#else
 	i32x4 g0 = f0 + f2;
 	i32x4 g1 = f0 - f2;
 	i32x4 g2 = (f1 >> 1) - f3;
@@ -163,6 +338,7 @@ static noinline void add_idct4x4(Edge264Context *ctx, int iYCbCr, int DCidx, uin
 	i32x4 h1 = g1 + g2;
 	i32x4 h2 = g1 - g2;
 	i32x4 h3 = g0 - g3;
+#endif
 	
 	// final residual values
 	i16x8 r0 = shrps32(h0, h1, 6);
@@ -182,7 +358,18 @@ static noinline void add_idct4x4(Edge264Context *ctx, int iYCbCr, int DCidx, uin
 	}
 }
 
-static void add_dc4x4(Edge264Context *ctx, int iYCbCr, int DCidx, uint8_t *p) {
+#if defined(CRTUBE_EDGE264_PROFILE)
+static noinline void add_idct4x4(Edge264Context *ctx, int iYCbCr, int DCidx, uint8_t *p) {
+	uint64_t _profile_start = edge264_profile_begin();
+	add_idct4x4_profile_impl(ctx, iYCbCr, DCidx, p);
+	edge264_profile_accumulate(5, _profile_start);
+}
+#else
+static noinline void add_idct4x4(Edge264Context *ctx, int iYCbCr, int DCidx, uint8_t *p) { add_idct4x4_profile_impl(ctx, iYCbCr, DCidx, p); }
+#endif
+
+
+static void add_dc4x4_profile_impl(Edge264Context *ctx, int iYCbCr, int DCidx, uint8_t *p) {
 	i32x4 r = set16((ctx->c[16 + DCidx] + 32) >> 6);
 	size_t stride = ctx->t.stride[iYCbCr];
 	DECL_SSTRIDE(stride);
@@ -197,12 +384,23 @@ static void add_dc4x4(Edge264Context *ctx, int iYCbCr, int DCidx, uint8_t *p) {
 	}
 }
 
+#if defined(CRTUBE_EDGE264_PROFILE)
+static void add_dc4x4(Edge264Context *ctx, int iYCbCr, int DCidx, uint8_t *p) {
+	uint64_t _profile_start = edge264_profile_begin();
+	add_dc4x4_profile_impl(ctx, iYCbCr, DCidx, p);
+	edge264_profile_accumulate(7, _profile_start);
+}
+#else
+static void add_dc4x4(Edge264Context *ctx, int iYCbCr, int DCidx, uint8_t *p) { add_dc4x4_profile_impl(ctx, iYCbCr, DCidx, p); }
+#endif
+
+
 
 
 /**
  * Inverse 8x8 transform
  */
-static void add_idct8x8(Edge264Context *ctx, int iYCbCr, uint8_t *dst0)
+static void add_idct8x8_profile_impl(Edge264Context *ctx, int iYCbCr, uint8_t *dst0)
 {
 	// loading and scaling
 	unsigned qP = ctx->t.QP[iYCbCr];
@@ -260,6 +458,28 @@ static void add_idct8x8(Edge264Context *ctx, int iYCbCr, uint8_t *dst0)
 		
 		for (int i = 2;;) {
 			// 1D transform
+#if SIMD == R5900
+			i16x8 e0, e2;
+			r5900_addsub16(d0, d4, &e0, &e2);
+			i16x8 e1 = r5900_sub16(r5900_sub16(d5, d3), r5900_add16(r5900_sar16_1(d7), d7));
+			i16x8 e3 = r5900_sub16(r5900_add16(d1, d7), r5900_add16(r5900_sar16_1(d3), d3));
+			i16x8 e4 = r5900_sub16(r5900_sar16_1(d2), d6);
+			i16x8 e5 = r5900_add16(r5900_sub16(d7, d1), r5900_add16(r5900_sar16_1(d5), d5));
+			i16x8 e6 = r5900_add16(r5900_sar16_1(d6), d2);
+			i16x8 e7 = r5900_add16(r5900_add16(d3, d5), r5900_add16(r5900_sar16_1(d1), d1));
+			i16x8 f0, f6;
+			r5900_addsub16(e0, e6, &f0, &f6);
+			i16x8 f1 = r5900_add16(r5900_sar16_2(e7), e1);
+			i16x8 f2, f4;
+			r5900_addsub16(e2, e4, &f2, &f4);
+			i16x8 f3 = r5900_add16(r5900_sar16_2(e5), e3);
+			i16x8 f5 = r5900_sub16(r5900_sar16_2(e3), e5);
+			i16x8 f7 = r5900_sub16(e7, r5900_sar16_2(e1));
+			r5900_addsub16(f0, f7, &d0, &d7);
+			r5900_addsub16(f2, f5, &d1, &d6);
+			r5900_addsub16(f4, f3, &d2, &d5);
+			r5900_addsub16(f6, f1, &d3, &d4);
+#else
 			i16x8 e0 = d0 + d4;
 			i16x8 e1 = d5 - d3 - ((d7 >> 1) + d7);
 			i16x8 e2 = d0 - d4;
@@ -286,6 +506,7 @@ static void add_idct8x8(Edge264Context *ctx, int iYCbCr, uint8_t *dst0)
 			d5 = f4 - f3;
 			d6 = f2 - f5;
 			d7 = f0 - f7;
+#endif
 			if (--i == 0)
 				break;
 			
@@ -317,6 +538,16 @@ static void add_idct8x8(Edge264Context *ctx, int iYCbCr, uint8_t *dst0)
 		}
 		
 		// final residual values
+#if SIMD == R5900
+		i16x8 r0 = r5900_sar16_6(d0);
+		i16x8 r1 = r5900_sar16_6(d1);
+		i16x8 r2 = r5900_sar16_6(d2);
+		i16x8 r3 = r5900_sar16_6(d3);
+		i16x8 r4 = r5900_sar16_6(d4);
+		i16x8 r5 = r5900_sar16_6(d5);
+		i16x8 r6 = r5900_sar16_6(d6);
+		i16x8 r7 = r5900_sar16_6(d7);
+#else
 		i16x8 r0 = d0 >> 6;
 		i16x8 r1 = d1 >> 6;
 		i16x8 r2 = d2 >> 6;
@@ -325,6 +556,7 @@ static void add_idct8x8(Edge264Context *ctx, int iYCbCr, uint8_t *dst0)
 		i16x8 r5 = d5 >> 6;
 		i16x8 r6 = d6 >> 6;
 		i16x8 r7 = d7 >> 6;
+#endif
 		
 		// addition to values in place, clipping and storage
 		size_t stride = ctx->t.stride[iYCbCr];
@@ -353,6 +585,17 @@ static void add_idct8x8(Edge264Context *ctx, int iYCbCr, uint8_t *dst0)
 	} // FIXME else 16bit
 }
 
+#if defined(CRTUBE_EDGE264_PROFILE)
+static void add_idct8x8(Edge264Context *ctx, int iYCbCr, uint8_t *dst0) {
+	uint64_t _profile_start = edge264_profile_begin();
+	add_idct8x8_profile_impl(ctx, iYCbCr, dst0);
+	edge264_profile_accumulate(6, _profile_start);
+}
+#else
+static void add_idct8x8(Edge264Context *ctx, int iYCbCr, uint8_t *dst0) { add_idct8x8_profile_impl(ctx, iYCbCr, dst0); }
+#endif
+
+
 
 
 /**
@@ -360,18 +603,17 @@ static void add_idct8x8(Edge264Context *ctx, int iYCbCr, uint8_t *dst0)
  * 
  * These functions do not gain enough from 8bit to justify distinct versions.
  */
-static void transform_dc4x4(Edge264Context *ctx, int iYCbCr)
+static void transform_dc4x4_profile_impl(Edge264Context *ctx, int iYCbCr)
 {
-	// load matrix in column order and multiply right
-	i32x4 x0 = ctx->c_v[0] + ctx->c_v[1];
-	i32x4 x1 = ctx->c_v[2] + ctx->c_v[3];
-	i32x4 x2 = ctx->c_v[0] - ctx->c_v[1];
-	i32x4 x3 = ctx->c_v[2] - ctx->c_v[3];
+	// Load matrix in column order. Fuse each paired sum/difference so
+	// every input pair is marshalled once into the R5900 MMI registers.
+	i32x4 x0, x2, x1, x3;
+	r5900_addsub32(ctx->c_v[0], ctx->c_v[1], &x0, &x2);
+	r5900_addsub32(ctx->c_v[2], ctx->c_v[3], &x1, &x3);
 	ctx->c_v[0] = ctx->c_v[1] = ctx->c_v[2] = ctx->c_v[3] = (i8x16){};
-	i32x4 x4 = x0 + x1;
-	i32x4 x5 = x0 - x1;
-	i32x4 x6 = x2 - x3;
-	i32x4 x7 = x2 + x3;
+	i32x4 x4, x5, x7, x6;
+	r5900_addsub32(x0, x1, &x4, &x5);
+	r5900_addsub32(x2, x3, &x7, &x6);
 	
 	// transpose
 	i32x4 x8 = ziplo32(x4, x5);
@@ -383,15 +625,13 @@ static void transform_dc4x4(Edge264Context *ctx, int iYCbCr)
 	i32x4 xE = ziplo64(xA, xB);
 	i32x4 xF = ziphi64(xA, xB);
 	
-	// multiply left
-	i32x4 xG = xC + xD;
-	i32x4 xH = xE + xF;
-	i32x4 xI = xC - xD;
-	i32x4 xJ = xE - xF;
-	i32x4 f0 = xG + xH;
-	i32x4 f1 = xG - xH;
-	i32x4 f2 = xI - xJ;
-	i32x4 f3 = xI + xJ;
+	// Multiply left, again fusing the paired butterfly outputs.
+	i32x4 xG, xI, xH, xJ;
+	r5900_addsub32(xC, xD, &xG, &xI);
+	r5900_addsub32(xE, xF, &xH, &xJ);
+	i32x4 f0, f1, f3, f2;
+	r5900_addsub32(xG, xH, &f0, &f1);
+	r5900_addsub32(xI, xJ, &f3, &f2);
 	
 	// scale
 	unsigned qP = ctx->t.QP[0]; // FIXME 4:4:4
@@ -464,18 +704,30 @@ static void transform_dc4x4(Edge264Context *ctx, int iYCbCr)
 	}
 }
 
-static void transform_dc2x2(Edge264Context *ctx)
+#if defined(CRTUBE_EDGE264_PROFILE)
+static void transform_dc4x4(Edge264Context *ctx, int iYCbCr) {
+	uint64_t _profile_start = edge264_profile_begin();
+	transform_dc4x4_profile_impl(ctx, iYCbCr);
+	edge264_profile_accumulate(8, _profile_start);
+}
+#else
+static void transform_dc4x4(Edge264Context *ctx, int iYCbCr) { transform_dc4x4_profile_impl(ctx, iYCbCr); }
+#endif
+
+
+static void transform_dc2x2_profile_impl(Edge264Context *ctx)
 {
-	// load both matrices interlaced+transposed and multiply right
-	i32x4 d0 = ctx->c_v[0] + ctx->c_v[1];
-	i32x4 d1 = ctx->c_v[0] - ctx->c_v[1];
+	// Load both matrices interlaced+transposed and fuse the first
+	// Hadamard sum/difference pair.
+	i32x4 d0, d1;
+	r5900_addsub32(ctx->c_v[0], ctx->c_v[1], &d0, &d1);
 	ctx->c_v[0] = ctx->c_v[1] = (i8x16){};
 	
 	// transpose and multiply left
 	i32x4 e0 = ziplo64(d0, d1);
 	i32x4 e1 = ziphi64(d0, d1);
-	i32x4 f0 = e0 + e1;
-	i32x4 f1 = e0 - e1;
+	i32x4 f0, f1;
+	r5900_addsub32(e0, e1, &f0, &f1);
 	
 	// deinterlace and scale
 	unsigned qPb = ctx->t.QP[1];
@@ -547,6 +799,17 @@ static void transform_dc2x2(Edge264Context *ctx)
 		}
 	}
 }
+
+#if defined(CRTUBE_EDGE264_PROFILE)
+static void transform_dc2x2(Edge264Context *ctx) {
+	uint64_t _profile_start = edge264_profile_begin();
+	transform_dc2x2_profile_impl(ctx);
+	edge264_profile_accumulate(8, _profile_start);
+}
+#else
+static void transform_dc2x2(Edge264Context *ctx) { transform_dc2x2_profile_impl(ctx); }
+#endif
+
 
 
 

@@ -1,5 +1,11 @@
 #include "../third_party/edge264/src/edge264_deblock.c"
 #include <stdio.h>
+#ifdef CRTUBE_R5900_SMB_LOG
+#include "../include/debug_log.h"
+#define TEST_LOG(...) crtube_log(__VA_ARGS__)
+#else
+#define TEST_LOG(...) printf(__VA_ARGS__)
+#endif
 #include <string.h>
 
 static uint32_t rng_state = 0x91e10da5u;
@@ -74,7 +80,12 @@ int main(void) {
     digest=0xffffffffu; run_chroma(20000); uint32_t chroma=digest^0xffffffffu;
     digest=0xffffffffu; run_luma_hard(20000); uint32_t luma_hard=digest^0xffffffffu;
     digest=0xffffffffu; run_chroma_hard(20000); uint32_t chroma_hard=digest^0xffffffffu;
-    printf("deblock_luma=%08x deblock_chroma=%08x luma_hard=%08x chroma_hard=%08x\n",
+    TEST_LOG("deblock_luma=%08x deblock_chroma=%08x luma_hard=%08x chroma_hard=%08x\n",
            (unsigned)luma,(unsigned)chroma,(unsigned)luma_hard,(unsigned)chroma_hard);
+    if (luma != 0x5811e251u || chroma != 0x7e2c4edcu ||
+        luma_hard != 0x281da62du || chroma_hard != 0xd0271307u) {
+        TEST_LOG("deblock function reference CRC mismatch\n");
+        return 1;
+    }
     return 0;
 }

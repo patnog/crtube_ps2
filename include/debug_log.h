@@ -3,6 +3,7 @@
 
 int crtube_log_init(const char *elf_path);
 void crtube_log(const char *format, ...);
+void crtube_log_set_enabled(int enabled);
 void crtube_log_close(void);
 
 #endif

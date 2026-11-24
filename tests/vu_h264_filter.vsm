@@ -1,0 +1,377 @@
+; H.264 six-tap interpolation compute probe for VU0/VU1.
+; Input qwords 0..95: six tap planes, 16 groups x 4 lanes.
+; Input qwords 96..101: coefficient vectors (1,-5,20,20,-5,1).
+; Output qwords 102..117: 16 groups x 4 lanes.
+.vu
+.align 4
+.global VU_H264_Filter_CodeStart
+.global VU_H264_Filter_CodeEnd
+VU_H264_Filter_CodeStart:
+        NOP                                                        iaddiu        VI14,VI00,64
+NOP                                                             lq            VF07,96(VI00)
+NOP                                                             lq            VF08,97(VI00)
+NOP                                                             lq            VF09,98(VI00)
+NOP                                                             lq            VF10,99(VI00)
+NOP                                                             lq            VF11,100(VI00)
+NOP                                                             lq            VF12,101(VI00)
+; Diagnostic marker: qword 118 receives coefficient vector 0 if MSCAL runs.
+NOP                                                             sq            VF07,118(VI00)
+filter_repeat:
+NOP                                                             lq            VF01,0(VI00)
+NOP                                                             lq            VF02,16(VI00)
+NOP                                                             lq            VF03,32(VI00)
+NOP                                                             lq            VF04,48(VI00)
+NOP                                                             lq            VF05,64(VI00)
+NOP                                                             lq            VF06,80(VI00)
+itof0         VF01,VF01                                         NOP
+itof0         VF02,VF02                                         NOP
+itof0         VF03,VF03                                         NOP
+itof0         VF04,VF04                                         NOP
+itof0         VF05,VF05                                         NOP
+itof0         VF06,VF06                                         NOP
+mulax         ACC,VF01,VF07x                                    NOP
+maddax        ACC,VF02,VF08x                                    NOP
+madday        ACC,VF03,VF09y                                    NOP
+maddaz        ACC,VF04,VF10z                                    NOP
+maddaw        ACC,VF05,VF11w                                    NOP
+maddw         VF13,VF06,VF12w                                   NOP
+NOP                                                             NOP
+NOP                                                             NOP
+NOP                                                             NOP
+NOP                                                             sq            VF13,102(VI00)
+NOP                                                             lq            VF01,1(VI00)
+NOP                                                             lq            VF02,17(VI00)
+NOP                                                             lq            VF03,33(VI00)
+NOP                                                             lq            VF04,49(VI00)
+NOP                                                             lq            VF05,65(VI00)
+NOP                                                             lq            VF06,81(VI00)
+itof0         VF01,VF01                                         NOP
+itof0         VF02,VF02                                         NOP
+itof0         VF03,VF03                                         NOP
+itof0         VF04,VF04                                         NOP
+itof0         VF05,VF05                                         NOP
+itof0         VF06,VF06                                         NOP
+mulax         ACC,VF01,VF07x                                    NOP
+maddax        ACC,VF02,VF08x                                    NOP
+madday        ACC,VF03,VF09y                                    NOP
+maddaz        ACC,VF04,VF10z                                    NOP
+maddaw        ACC,VF05,VF11w                                    NOP
+maddw         VF13,VF06,VF12w                                   NOP
+NOP                                                             NOP
+NOP                                                             NOP
+NOP                                                             NOP
+NOP                                                             sq            VF13,103(VI00)
+NOP                                                             lq            VF01,2(VI00)
+NOP                                                             lq            VF02,18(VI00)
+NOP                                                             lq            VF03,34(VI00)
+NOP                                                             lq            VF04,50(VI00)
+NOP                                                             lq            VF05,66(VI00)
+NOP                                                             lq            VF06,82(VI00)
+itof0         VF01,VF01                                         NOP
+itof0         VF02,VF02                                         NOP
+itof0         VF03,VF03                                         NOP
+itof0         VF04,VF04                                         NOP
+itof0         VF05,VF05                                         NOP
+itof0         VF06,VF06                                         NOP
+mulax         ACC,VF01,VF07x                                    NOP
+maddax        ACC,VF02,VF08x                                    NOP
+madday        ACC,VF03,VF09y                                    NOP
+maddaz        ACC,VF04,VF10z                                    NOP
+maddaw        ACC,VF05,VF11w                                    NOP
+maddw         VF13,VF06,VF12w                                   NOP
+NOP                                                             NOP
+NOP                                                             NOP
+NOP                                                             NOP
+NOP                                                             sq            VF13,104(VI00)
+NOP                                                             lq            VF01,3(VI00)
+NOP                                                             lq            VF02,19(VI00)
+NOP                                                             lq            VF03,35(VI00)
+NOP                                                             lq            VF04,51(VI00)
+NOP                                                             lq            VF05,67(VI00)
+NOP                                                             lq            VF06,83(VI00)
+itof0         VF01,VF01                                         NOP
+itof0         VF02,VF02                                         NOP
+itof0         VF03,VF03                                         NOP
+itof0         VF04,VF04                                         NOP
+itof0         VF05,VF05                                         NOP
+itof0         VF06,VF06                                         NOP
+mulax         ACC,VF01,VF07x                                    NOP
+maddax        ACC,VF02,VF08x                                    NOP
+madday        ACC,VF03,VF09y                                    NOP
+maddaz        ACC,VF04,VF10z                                    NOP
+maddaw        ACC,VF05,VF11w                                    NOP
+maddw         VF13,VF06,VF12w                                   NOP
+NOP                                                             NOP
+NOP                                                             NOP
+NOP                                                             NOP
+NOP                                                             sq            VF13,105(VI00)
+NOP                                                             lq            VF01,4(VI00)
+NOP                                                             lq            VF02,20(VI00)
+NOP                                                             lq            VF03,36(VI00)
+NOP                                                             lq            VF04,52(VI00)
+NOP                                                             lq            VF05,68(VI00)
+NOP                                                             lq            VF06,84(VI00)
+itof0         VF01,VF01                                         NOP
+itof0         VF02,VF02                                         NOP
+itof0         VF03,VF03                                         NOP
+itof0         VF04,VF04                                         NOP
+itof0         VF05,VF05                                         NOP
+itof0         VF06,VF06                                         NOP
+mulax         ACC,VF01,VF07x                                    NOP
+maddax        ACC,VF02,VF08x                                    NOP
+madday        ACC,VF03,VF09y                                    NOP
+maddaz        ACC,VF04,VF10z                                    NOP
+maddaw        ACC,VF05,VF11w                                    NOP
+maddw         VF13,VF06,VF12w                                   NOP
+NOP                                                             NOP
+NOP                                                             NOP
+NOP                                                             NOP
+NOP                                                             sq            VF13,106(VI00)
+NOP                                                             lq            VF01,5(VI00)
+NOP                                                             lq            VF02,21(VI00)
+NOP                                                             lq            VF03,37(VI00)
+NOP                                                             lq            VF04,53(VI00)
+NOP                                                             lq            VF05,69(VI00)
+NOP                                                             lq            VF06,85(VI00)
+itof0         VF01,VF01                                         NOP
+itof0         VF02,VF02                                         NOP
+itof0         VF03,VF03                                         NOP
+itof0         VF04,VF04                                         NOP
+itof0         VF05,VF05                                         NOP
+itof0         VF06,VF06                                         NOP
+mulax         ACC,VF01,VF07x                                    NOP
+maddax        ACC,VF02,VF08x                                    NOP
+madday        ACC,VF03,VF09y                                    NOP
+maddaz        ACC,VF04,VF10z                                    NOP
+maddaw        ACC,VF05,VF11w                                    NOP
+maddw         VF13,VF06,VF12w                                   NOP
+NOP                                                             NOP
+NOP                                                             NOP
+NOP                                                             NOP
+NOP                                                             sq            VF13,107(VI00)
+NOP                                                             lq            VF01,6(VI00)
+NOP                                                             lq            VF02,22(VI00)
+NOP                                                             lq            VF03,38(VI00)
+NOP                                                             lq            VF04,54(VI00)
+NOP                                                             lq            VF05,70(VI00)
+NOP                                                             lq            VF06,86(VI00)
+itof0         VF01,VF01                                         NOP
+itof0         VF02,VF02                                         NOP
+itof0         VF03,VF03                                         NOP
+itof0         VF04,VF04                                         NOP
+itof0         VF05,VF05                                         NOP
+itof0         VF06,VF06                                         NOP
+mulax         ACC,VF01,VF07x                                    NOP
+maddax        ACC,VF02,VF08x                                    NOP
+madday        ACC,VF03,VF09y                                    NOP
+maddaz        ACC,VF04,VF10z                                    NOP
+maddaw        ACC,VF05,VF11w                                    NOP
+maddw         VF13,VF06,VF12w                                   NOP
+NOP                                                             NOP
+NOP                                                             NOP
+NOP                                                             NOP
+NOP                                                             sq            VF13,108(VI00)
+NOP                                                             lq            VF01,7(VI00)
+NOP                                                             lq            VF02,23(VI00)
+NOP                                                             lq            VF03,39(VI00)
+NOP                                                             lq            VF04,55(VI00)
+NOP                                                             lq            VF05,71(VI00)
+NOP                                                             lq            VF06,87(VI00)
+itof0         VF01,VF01                                         NOP
+itof0         VF02,VF02                                         NOP
+itof0         VF03,VF03                                         NOP
+itof0         VF04,VF04                                         NOP
+itof0         VF05,VF05                                         NOP
+itof0         VF06,VF06                                         NOP
+mulax         ACC,VF01,VF07x                                    NOP
+maddax        ACC,VF02,VF08x                                    NOP
+madday        ACC,VF03,VF09y                                    NOP
+maddaz        ACC,VF04,VF10z                                    NOP
+maddaw        ACC,VF05,VF11w                                    NOP
+maddw         VF13,VF06,VF12w                                   NOP
+NOP                                                             NOP
+NOP                                                             NOP
+NOP                                                             NOP
+NOP                                                             sq            VF13,109(VI00)
+NOP                                                             lq            VF01,8(VI00)
+NOP                                                             lq            VF02,24(VI00)
+NOP                                                             lq            VF03,40(VI00)
+NOP                                                             lq            VF04,56(VI00)
+NOP                                                             lq            VF05,72(VI00)
+NOP                                                             lq            VF06,88(VI00)
+itof0         VF01,VF01                                         NOP
+itof0         VF02,VF02                                         NOP
+itof0         VF03,VF03                                         NOP
+itof0         VF04,VF04                                         NOP
+itof0         VF05,VF05                                         NOP
+itof0         VF06,VF06                                         NOP
+mulax         ACC,VF01,VF07x                                    NOP
+maddax        ACC,VF02,VF08x                                    NOP
+madday        ACC,VF03,VF09y                                    NOP
+maddaz        ACC,VF04,VF10z                                    NOP
+maddaw        ACC,VF05,VF11w                                    NOP
+maddw         VF13,VF06,VF12w                                   NOP
+NOP                                                             NOP
+NOP                                                             NOP
+NOP                                                             NOP
+NOP                                                             sq            VF13,110(VI00)
+NOP                                                             lq            VF01,9(VI00)
+NOP                                                             lq            VF02,25(VI00)
+NOP                                                             lq            VF03,41(VI00)
+NOP                                                             lq            VF04,57(VI00)
+NOP                                                             lq            VF05,73(VI00)
+NOP                                                             lq            VF06,89(VI00)
+itof0         VF01,VF01                                         NOP
+itof0         VF02,VF02                                         NOP
+itof0         VF03,VF03                                         NOP
+itof0         VF04,VF04                                         NOP
+itof0         VF05,VF05                                         NOP
+itof0         VF06,VF06                                         NOP
+mulax         ACC,VF01,VF07x                                    NOP
+maddax        ACC,VF02,VF08x                                    NOP
+madday        ACC,VF03,VF09y                                    NOP
+maddaz        ACC,VF04,VF10z                                    NOP
+maddaw        ACC,VF05,VF11w                                    NOP
+maddw         VF13,VF06,VF12w                                   NOP
+NOP                                                             NOP
+NOP                                                             NOP
+NOP                                                             NOP
+NOP                                                             sq            VF13,111(VI00)
+NOP                                                             lq            VF01,10(VI00)
+NOP                                                             lq            VF02,26(VI00)
+NOP                                                             lq            VF03,42(VI00)
+NOP                                                             lq            VF04,58(VI00)
+NOP                                                             lq            VF05,74(VI00)
+NOP                                                             lq            VF06,90(VI00)
+itof0         VF01,VF01                                         NOP
+itof0         VF02,VF02                                         NOP
+itof0         VF03,VF03                                         NOP
+itof0         VF04,VF04                                         NOP
+itof0         VF05,VF05                                         NOP
+itof0         VF06,VF06                                         NOP
+mulax         ACC,VF01,VF07x                                    NOP
+maddax        ACC,VF02,VF08x                                    NOP
+madday        ACC,VF03,VF09y                                    NOP
+maddaz        ACC,VF04,VF10z                                    NOP
+maddaw        ACC,VF05,VF11w                                    NOP
+maddw         VF13,VF06,VF12w                                   NOP
+NOP                                                             NOP
+NOP                                                             NOP
+NOP                                                             NOP
+NOP                                                             sq            VF13,112(VI00)
+NOP                                                             lq            VF01,11(VI00)
+NOP                                                             lq            VF02,27(VI00)
+NOP                                                             lq            VF03,43(VI00)
+NOP                                                             lq            VF04,59(VI00)
+NOP                                                             lq            VF05,75(VI00)
+NOP                                                             lq            VF06,91(VI00)
+itof0         VF01,VF01                                         NOP
+itof0         VF02,VF02                                         NOP
+itof0         VF03,VF03                                         NOP
+itof0         VF04,VF04                                         NOP
+itof0         VF05,VF05                                         NOP
+itof0         VF06,VF06                                         NOP
+mulax         ACC,VF01,VF07x                                    NOP
+maddax        ACC,VF02,VF08x                                    NOP
+madday        ACC,VF03,VF09y                                    NOP
+maddaz        ACC,VF04,VF10z                                    NOP
+maddaw        ACC,VF05,VF11w                                    NOP
+maddw         VF13,VF06,VF12w                                   NOP
+NOP                                                             NOP
+NOP                                                             NOP
+NOP                                                             NOP
+NOP                                                             sq            VF13,113(VI00)
+NOP                                                             lq            VF01,12(VI00)
+NOP                                                             lq            VF02,28(VI00)
+NOP                                                             lq            VF03,44(VI00)
+NOP                                                             lq            VF04,60(VI00)
+NOP                                                             lq            VF05,76(VI00)
+NOP                                                             lq            VF06,92(VI00)
+itof0         VF01,VF01                                         NOP
+itof0         VF02,VF02                                         NOP
+itof0         VF03,VF03                                         NOP
+itof0         VF04,VF04                                         NOP
+itof0         VF05,VF05                                         NOP
+itof0         VF06,VF06                                         NOP
+mulax         ACC,VF01,VF07x                                    NOP
+maddax        ACC,VF02,VF08x                                    NOP
+madday        ACC,VF03,VF09y                                    NOP
+maddaz        ACC,VF04,VF10z                                    NOP
+maddaw        ACC,VF05,VF11w                                    NOP
+maddw         VF13,VF06,VF12w                                   NOP
+NOP                                                             NOP
+NOP                                                             NOP
+NOP                                                             NOP
+NOP                                                             sq            VF13,114(VI00)
+NOP                                                             lq            VF01,13(VI00)
+NOP                                                             lq            VF02,29(VI00)
+NOP                                                             lq            VF03,45(VI00)
+NOP                                                             lq            VF04,61(VI00)
+NOP                                                             lq            VF05,77(VI00)
+NOP                                                             lq            VF06,93(VI00)
+itof0         VF01,VF01                                         NOP
+itof0         VF02,VF02                                         NOP
+itof0         VF03,VF03                                         NOP
+itof0         VF04,VF04                                         NOP
+itof0         VF05,VF05                                         NOP
+itof0         VF06,VF06                                         NOP
+mulax         ACC,VF01,VF07x                                    NOP
+maddax        ACC,VF02,VF08x                                    NOP
+madday        ACC,VF03,VF09y                                    NOP
+maddaz        ACC,VF04,VF10z                                    NOP
+maddaw        ACC,VF05,VF11w                                    NOP
+maddw         VF13,VF06,VF12w                                   NOP
+NOP                                                             NOP
+NOP                                                             NOP
+NOP                                                             NOP
+NOP                                                             sq            VF13,115(VI00)
+NOP                                                             lq            VF01,14(VI00)
+NOP                                                             lq            VF02,30(VI00)
+NOP                                                             lq            VF03,46(VI00)
+NOP                                                             lq            VF04,62(VI00)
+NOP                                                             lq            VF05,78(VI00)
+NOP                                                             lq            VF06,94(VI00)
+itof0         VF01,VF01                                         NOP
+itof0         VF02,VF02                                         NOP
+itof0         VF03,VF03                                         NOP
+itof0         VF04,VF04                                         NOP
+itof0         VF05,VF05                                         NOP
+itof0         VF06,VF06                                         NOP
+mulax         ACC,VF01,VF07x                                    NOP
+maddax        ACC,VF02,VF08x                                    NOP
+madday        ACC,VF03,VF09y                                    NOP
+maddaz        ACC,VF04,VF10z                                    NOP
+maddaw        ACC,VF05,VF11w                                    NOP
+maddw         VF13,VF06,VF12w                                   NOP
+NOP                                                             NOP
+NOP                                                             NOP
+NOP                                                             NOP
+NOP                                                             sq            VF13,116(VI00)
+NOP                                                             lq            VF01,15(VI00)
+NOP                                                             lq            VF02,31(VI00)
+NOP                                                             lq            VF03,47(VI00)
+NOP                                                             lq            VF04,63(VI00)
+NOP                                                             lq            VF05,79(VI00)
+NOP                                                             lq            VF06,95(VI00)
+itof0         VF01,VF01                                         NOP
+itof0         VF02,VF02                                         NOP
+itof0         VF03,VF03                                         NOP
+itof0         VF04,VF04                                         NOP
+itof0         VF05,VF05                                         NOP
+itof0         VF06,VF06                                         NOP
+mulax         ACC,VF01,VF07x                                    NOP
+maddax        ACC,VF02,VF08x                                    NOP
+madday        ACC,VF03,VF09y                                    NOP
+maddaz        ACC,VF04,VF10z                                    NOP
+maddaw        ACC,VF05,VF11w                                    NOP
+maddw         VF13,VF06,VF12w                                   NOP
+NOP                                                             NOP
+NOP                                                             NOP
+NOP                                                             NOP
+NOP                                                             sq            VF13,117(VI00)
+NOP                                                             isubiu        VI14,VI14,1
+NOP                                                             ibne          VI14,VI00,filter_repeat
+NOP                                                             NOP
+NOP[E]                                                          NOP
+.align 4
+VU_H264_Filter_CodeEnd:

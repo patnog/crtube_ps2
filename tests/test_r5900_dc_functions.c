@@ -1,5 +1,11 @@
 #include "../third_party/edge264/src/edge264_residual.c"
 #include <stdio.h>
+#ifdef CRTUBE_R5900_SMB_LOG
+#include "../include/debug_log.h"
+#define TEST_LOG(...) crtube_log(__VA_ARGS__)
+#else
+#define TEST_LOG(...) printf(__VA_ARGS__)
+#endif
 #include <stdlib.h>
 #include <string.h>
 
@@ -71,7 +77,12 @@ int main(void) {
     digest=0xffffffffu; test_add_dc4x4(); d_add=finish_digest();
     digest=0xffffffffu; test_transform_dc4x4(); d_4x4=finish_digest();
     digest=0xffffffffu; test_transform_dc2x2(); d_2x2=finish_digest();
-    printf("add_dc4x4=%08x transform_dc4x4=%08x transform_dc2x2=%08x\n",
+    TEST_LOG("add_dc4x4=%08x transform_dc4x4=%08x transform_dc2x2=%08x\n",
            (unsigned)d_add, (unsigned)d_4x4, (unsigned)d_2x2);
+    if (d_add != 0x374b68e5u || d_4x4 != 0x045237a9u ||
+        d_2x2 != 0x6bd3a3c7u) {
+        TEST_LOG("DC reconstruction reference CRC mismatch\n");
+        return 1;
+    }
     return 0;
 }

@@ -294,7 +294,7 @@
 /**
  * Intra 4x4
  */
-static cold noinline void decode_intra4x4(uint8_t * restrict p, size_t stride, int mode, i16x8 clip) {
+static cold noinline void decode_intra4x4_profile_impl(uint8_t * restrict p, size_t stride, int mode, i16x8 clip) {
 	static const i8x16 shuf[6] = {
 		{0, 1, 2, 3, 1, 2, 3, 4, 2, 3, 4, 5, 3, 4, 5, 6},
 		{3, 4, 5, 6, 2, 3, 4, 5, 1, 2, 3, 4, 0, 1, 2, 3},
@@ -378,6 +378,17 @@ static cold noinline void decode_intra4x4(uint8_t * restrict p, size_t stride, i
 	*(int32_t *)(p + stride * 3) = v[3];
 }
 
+#if defined(CRTUBE_EDGE264_PROFILE)
+static cold noinline void decode_intra4x4(uint8_t * restrict p, size_t stride, int mode, i16x8 clip) {
+	uint64_t _profile_start = edge264_profile_begin();
+	decode_intra4x4_profile_impl(p, stride, mode, clip);
+	edge264_profile_accumulate(1, _profile_start);
+}
+#else
+static cold noinline void decode_intra4x4(uint8_t * restrict p, size_t stride, int mode, i16x8 clip) { decode_intra4x4_profile_impl(p, stride, mode, clip); }
+#endif
+
+
 
 
 /**
@@ -386,7 +397,7 @@ static cold noinline void decode_intra4x4(uint8_t * restrict p, size_t stride, i
  * Neighbouring samples are named a to z from bottom left to top right, with
  * i being p[-1,-1] or p[-1,0] if unavailable, and j being p[-1,-1] or p[0,-1].
  */
-static cold noinline void decode_intra8x8(uint8_t * restrict p, size_t stride, int mode, i16x8 clip) {
+static cold noinline void decode_intra8x8_profile_impl(uint8_t * restrict p, size_t stride, int mode, i16x8 clip) {
 	const uint8_t *pT = p - stride;
 	i8x16 i2a, j2s, j2y, k2z, k2r, h2a;
 	i64x2 p0, p1, p2, p3, p4, p5, p6, p7;
@@ -621,12 +632,23 @@ static cold noinline void decode_intra8x8(uint8_t * restrict p, size_t stride, i
 	*(int64_t *)(p + stride) = p7[0];
 }
 
+#if defined(CRTUBE_EDGE264_PROFILE)
+static cold noinline void decode_intra8x8(uint8_t * restrict p, size_t stride, int mode, i16x8 clip) {
+	uint64_t _profile_start = edge264_profile_begin();
+	decode_intra8x8_profile_impl(p, stride, mode, clip);
+	edge264_profile_accumulate(2, _profile_start);
+}
+#else
+static cold noinline void decode_intra8x8(uint8_t * restrict p, size_t stride, int mode, i16x8 clip) { decode_intra8x8_profile_impl(p, stride, mode, clip); }
+#endif
+
+
 
 
 /**
  * Intra 16x16
  */
-static cold noinline void decode_intra16x16(uint8_t * restrict p, size_t stride, int mode, i16x8 clip) {
+static cold noinline void decode_intra16x16_profile_impl(uint8_t * restrict p, size_t stride, int mode, i16x8 clip) {
 	const uint8_t *pT = p - stride;
 	i8x16 pred;
 	switch (mode) {
@@ -687,12 +709,23 @@ static cold noinline void decode_intra16x16(uint8_t * restrict p, size_t stride,
 		*(i8x16 *)p = pred;
 }
 
+#if defined(CRTUBE_EDGE264_PROFILE)
+static cold noinline void decode_intra16x16(uint8_t * restrict p, size_t stride, int mode, i16x8 clip) {
+	uint64_t _profile_start = edge264_profile_begin();
+	decode_intra16x16_profile_impl(p, stride, mode, clip);
+	edge264_profile_accumulate(3, _profile_start);
+}
+#else
+static cold noinline void decode_intra16x16(uint8_t * restrict p, size_t stride, int mode, i16x8 clip) { decode_intra16x16_profile_impl(p, stride, mode, clip); }
+#endif
+
+
 
 
 /**
  * Intra Chroma
  */
-static cold noinline void decode_intraChroma(uint8_t * restrict p, size_t stride, int mode, i16x8 clip) {
+static cold noinline void decode_intraChroma_profile_impl(uint8_t * restrict p, size_t stride, int mode, i16x8 clip) {
 	static const i8x16 shufDC = {0, 0, 0, 0, 4, 4, 4, 4, 8, 8, 8, 8, 12, 12, 12, 12};
 	static const i8x16 shufDCA = {0, 0, 0, 0, 12, 12, 12, 12, 0, 0, 0, 0, 12, 12, 12, 12};
 	static const i8x16 shufDCB = {0, 0, 0, 0, 0, 0, 0, 0, 12, 12, 12, 12, 12, 12, 12, 12};
@@ -769,3 +802,14 @@ static cold noinline void decode_intraChroma(uint8_t * restrict p, size_t stride
 		*(int64_t *)(p + stride * 9) = rpred[1];
 	}
 }
+
+#if defined(CRTUBE_EDGE264_PROFILE)
+static cold noinline void decode_intraChroma(uint8_t * restrict p, size_t stride, int mode, i16x8 clip) {
+	uint64_t _profile_start = edge264_profile_begin();
+	decode_intraChroma_profile_impl(p, stride, mode, clip);
+	edge264_profile_accumulate(4, _profile_start);
+}
+#else
+static cold noinline void decode_intraChroma(uint8_t * restrict p, size_t stride, int mode, i16x8 clip) { decode_intraChroma_profile_impl(p, stride, mode, clip); }
+#endif
+
